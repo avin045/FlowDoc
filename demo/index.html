@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Northwind Support — Sign in</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: #f1f5f9; color: #0f172a; }
+    header { background: #0e7490; color: #fff; padding: 16px 32px; font-weight: 700; font-size: 20px; }
+    .card { max-width: 420px; margin: 56px auto; background: #fff; border-radius: 14px; padding: 32px; box-shadow: 0 10px 30px rgba(15,23,42,.1); }
+    label { display: block; font-weight: 600; font-size: 14px; margin: 16px 0 6px; }
+    input[type=email], input[type=password], select { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+    .row { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 14px; }
+    button { margin-top: 24px; width: 100%; padding: 12px; border: 0; border-radius: 8px; background: #0e7490; color: #fff; font: 600 16px system-ui; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>Northwind Support</header>
+  <form class="card" action="ticket.html" method="post">
+    <h1 style="margin:0 0 4px;font-size:24px">Sign in</h1>
+    <p style="margin:0;color:#64748b">Demo page for testing the FlowDoc recorder.</p>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" placeholder="you@company.com" />
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" />
+    <label for="region">Region</label>
+    <select id="region" name="region">
+      <option>North America</option>
+      <option>Europe</option>
+      <option>Asia Pacific</option>
+    </select>
+    <div class="row"><input id="remember" type="checkbox" /><label for="remember" style="margin:0;font-weight:400">Remember me</label></div>
+    <button type="submit">Sign in</button>
+  </form>
+</body>
+</html>

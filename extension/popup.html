@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>FlowDoc</title>
+  <script src="app/theme.js"></script>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <img src="icons/logo.svg" alt="" width="26" height="26" />
+    <strong>FlowDoc</strong>
+    <button id="openWorkspace" class="link" title="Open your guides">My guides ↗</button>
+  </header>
+
+  <section id="idle" hidden>
+    <p class="lead">Capture a process once, get a step-by-step guide with screenshots.</p>
+    <button id="start" class="primary big">
+      <span class="rec"></span> Start capture
+    </button>
+    <p class="hint">Shortcut: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></p>
+    <p id="restricted" class="warn" hidden>This page can't be captured. Open a website first, then start capture.</p>
+    <h2>Recent guides</h2>
+    <ul id="recent"></ul>
+  </section>
+
+  <section id="active" hidden>
+    <div class="status">
+      <span class="rec pulse"></span>
+      <span id="statusText">Capturing…</span>
+      <span id="count" class="count"></span>
+    </div>
+    <p class="lead">Work through your process as usual. Every click, typed value and selection becomes a step.</p>
+    <button id="stop" class="primary big">Stop &amp; build guide</button>
+    <div class="row">
+      <button id="pause" class="secondary">Pause</button>
+      <button id="discard" class="secondary danger">Discard</button>
+    </div>
+  </section>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

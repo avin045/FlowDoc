@@ -1,0 +1,93 @@
+{
+  "name": "flowdoc",
+  "version": "1.0.0",
+  "description": "FlowDoc - record workflows (browser extension or Windows/Linux desktop app) into step-by-step guides; export to HTML, PDF, Word or Markdown",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "icons": "node scripts/icons.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node scripts/e2e.mjs",
+    "desktop": "electron .",
+    "test:desktop": "node scripts/desktop-test.mjs",
+    "dist:win": "node scripts/dist.mjs --win",
+    "dist:linux": "node scripts/dist.mjs --linux",
+    "postinstall": "node scripts/vendor.mjs"
+  },
+  "type": "module",
+  "devDependencies": {
+    "docx": "^9.5.1",
+    "electron": "44.6.0",
+    "electron-builder": "26.16.1",
+    "jspdf": "^2.5.2",
+    "jszip": "^3.10.1",
+    "playwright": "^1.55.0"
+  },
+  "private": true,
+  "dependencies": {
+    "uiohook-napi": "1.5.5"
+  },
+  "main": "desktop/main.js",
+  "author": "FlowDoc",
+  "build": {
+    "appId": "app.flowdoc.desktop",
+    "productName": "FlowDoc",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**",
+      "extension/**",
+      "demo/**",
+      "package.json",
+      "!extension/manifest.json",
+      "!**/*.map"
+    ],
+    "asarUnpack": [
+      "desktop/inspector/**",
+      "node_modules/uiohook-napi/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "build/icon.png",
+      "synopsis": "Record any workflow into a step-by-step guide",
+      "executableName": "flowdoc"
+    },
+    "deb": {
+      "depends": [
+        "libxtst6",
+        "libxkbfile1",
+        "python3-gi",
+        "gir1.2-atspi-2.0",
+        "xdotool"
+      ]
+    },
+    "npmRebuild": false
+  }
+}
