@@ -34,6 +34,15 @@ contextBridge.exposeInMainWorld('flowdocDesktop', {
     update: (patch) => ipcRenderer.invoke('settings:update', patch),
     setKey: (provider, key) => ipcRenderer.invoke('settings:setKey', provider, key),
   },
+  // Where guides are stored on disk (Settings → Guides folder).
+  storage: {
+    get: () => ipcRenderer.invoke('storage:get'),
+    inspect: (folder) => ipcRenderer.invoke('storage:inspect', folder),
+    choose: () => ipcRenderer.invoke('storage:choose'),
+    apply: (req) => ipcRenderer.invoke('storage:apply', req),
+    reset: (req) => ipcRenderer.invoke('storage:reset', req),
+    open: () => ipcRenderer.invoke('storage:open'),
+  },
   notion: {
     me: () => ipcRenderer.invoke('notion:me'),
     pages: (query) => ipcRenderer.invoke('notion:pages', query),

@@ -242,8 +242,9 @@ check(r.guide.steps.length >= 9, 'steps captured', `${r.guide.steps.length}`);
 check(r.guide.steps.every((s) => s.hasShot), 'every step has a screenshot');
 check(r.guide.steps.some((s) => s.target), 'element rectangles from the accessibility inspector');
 check(texts.some((t) => /Email/.test(t) && t.startsWith('Click')), 'click on Email field named via accessibility', texts[0]);
-check(texts.some((t) => t === 'Type "alex@northwind.example" in the **Email** field'), 'typed text captured with field label');
-check(texts.some((t) => t === 'Type your password in the **Password** field'), 'password masked');
+const focusNote = r.checks.demoFocused ? '' : 'another window kept keyboard focus during the test; leave the PC idle while it runs';
+check(texts.some((t) => t === 'Type "alex@northwind.example" in the **Email** field'), 'typed text captured with field label', focusNote);
+check(texts.some((t) => t === 'Type your password in the **Password** field'), 'password masked', focusNote);
 check(!r.rawContainsPassword, 'password never stored');
 check(texts.some((t) => /Remember me/.test(t)), 'checkbox click captured');
 check(texts.some((t) => /Sign in/.test(t)), 'button click captured');
@@ -324,6 +325,19 @@ check(imgBlocks.every((b) => !b.image.caption?.length), 'no "Step N" caption und
 check(allBlocks.some((b) => b.type === 'heading_2' && b.heading_2.rich_text[0].text.content === 'Sign in'), 'section headings become Notion headings');
 check(allBlocks.some((b) => b.type === 'heading_3' && b.heading_3.rich_text.some((t) => t.annotations.bold)), 'steps keep their bold element names');
 check(n.stored?.url === 'https://www.notion.so/page-new' && n.stored?.parentPath === FULL, 'the Notion link is saved on the guide');
+
+console.log('\nGuides folder');
+const st = r.storage || {};
+check(st.before?.isDefault && st.before.guides >= 2, 'starts in the default folder', JSON.stringify(st.before));
+check(st.inspectEmpty?.ok && !st.inspectEmpty.subfolder && st.inspectEmpty.target === st.inspectEmpty.chosen, 'an empty folder is used as it is');
+check(st.inspectBusy?.ok && st.inspectBusy.subfolder && /FlowDoc Guides$/.test(st.inspectBusy.target), 'a folder with other files gets a "FlowDoc Guides" subfolder', st.inspectBusy?.target);
+check(st.applied && !st.applied.isDefault && st.applied.copied === st.before.guides && st.applied.guides === st.before.guides, 'switching copies every guide to the new folder', JSON.stringify(st.applied));
+check(st.filesInNew && st.writesGoToNew, 'guides are read from and saved to the new folder');
+check(st.savedSetting === st.applied?.dir, 'the chosen folder is remembered in settings');
+check(st.ui?.path === st.applied?.dir && st.ui.kind === 'Custom' && st.ui.resetShown, 'Settings shows the custom folder with a "Use default" option', JSON.stringify(st.ui));
+check(/default folder again/.test(st.ui?.confirm || ''), 'switching asks for confirmation first');
+check(st.reset?.isDefault && st.reset.savedSetting === '' && st.editCameBack, 'Use default switches back, bringing changes along');
+check(st.missingDriveUsable === false, 'a folder on a missing drive is not used at startup (default is used instead)');
 
 console.log('\nRename + exports');
 check(r.legacyGuide === 'A guide made in StepCraft', 'guides from StepCraft carried over to FlowDoc');

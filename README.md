@@ -2,40 +2,87 @@
 
 Record a process once and get a step-by-step guide with annotated screenshots, in the style of Scribe (scribehow.com). Edit the guide, blur private details, and export it as **PDF, Word (.docx), HTML, Markdown** or a JSON backup. The desktop app can also save guides straight to **Notion**.
 
-> FlowDoc was previously called StepCraft. The desktop app copies your StepCraft guides, settings and saved keys across automatically the first time it starts, and old `.stepcraft.json` backups still import.
-
-Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider in the desktop app, and that feature is off by default.
+Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider or to Notion in the desktop app, and both are off by default.
 
 ## Contents
 
-1. [Which version should I use?](#1-which-version-should-i-use)
-2. [Get the code](#2-get-the-code)
-3. [Guide A: Chrome / Edge extension](#guide-a-chrome--edge-extension)
-4. [Guide B: Desktop app (Windows and Linux)](#guide-b-desktop-app-windows-and-linux)
-5. [Guide C: Editing and exporting a guide](#guide-c-editing-and-exporting-a-guide) (the same in both versions)
-6. [Web workspace (no install)](#web-workspace-no-install)
-7. [For developers](#for-developers)
-8. [Limitations](#limitations)
+1. [Before you start: what you need](#1-before-you-start-what-you-need)
+2. [Which version should I use?](#2-which-version-should-i-use)
+3. [Get the code](#3-get-the-code)
+4. [Guide A: Desktop app (Windows and Linux)](#guide-a-desktop-app-windows-and-linux) (recommended)
+5. [Guide B: Chrome / Edge extension](#guide-b-chrome--edge-extension) (not yet tested in Chrome)
+6. [Guide C: Editing and exporting a guide](#guide-c-editing-and-exporting-a-guide) (the same in both versions)
+7. [Web workspace (no install)](#web-workspace-no-install)
+8. [For developers](#for-developers)
+9. [Limitations](#limitations)
 
 ---
 
-## 1. Which version should I use?
+## 1. Before you start: what you need
 
-| | Chrome / Edge extension | Desktop app |
+> **Install Node.js and Git first.** Everything else (Electron, the recorder, the export libraries) is downloaded by `npm install` in step 3.
+
+### Required
+
+| What | Version | Where to get it | How to check it's installed |
+| --- | --- | --- | --- |
+| **Node.js** (includes **npm**) | 18 or newer. The **LTS** version is recommended. | [nodejs.org/en/download](https://nodejs.org/en/download) | `node -v` shows v18 or higher, and `npm -v` shows a version number |
+| **Git** | Any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) | `git --version` shows a version number |
+
+**Installing on Windows:**
+
+- **Node.js:** run the `.msi` installer and keep the defaults. Make sure **npm package manager** and **Add to PATH** stay selected. You do **not** need the optional "Tools for Native Modules" (Visual Studio Build Tools); FlowDoc's recorder ships ready-built.
+- **Git:** run the Git for Windows installer and keep the defaults.
+- **Afterwards:** close and reopen your terminal (Command Prompt, PowerShell or Windows Terminal) so it picks up the new programs, then run the check commands above.
+
+**Installing on Linux:**
+
+- **Node.js:** use the official installer, or your distribution's package (Ubuntu 22.04's default is too old, so prefer the NodeSource or nvm instructions linked from the Node.js download page).
+- **Git:** usually `sudo apt install git` (Debian/Ubuntu) or `sudo dnf install git` (Fedora).
+
+**You'll also need:**
+
+- an internet connection for `npm install`, which downloads about 500 MB the first time;
+- about **1 GB of free disk space**: roughly 500 MB for the project's dependencies, plus room for screenshots and, if you build installers, about 400 MB more.
+
+### For the desktop app
+
+- **Windows 10 (version 2004 or newer) or Windows 11.** Version 2004 or newer is needed to keep the recorder bar out of screenshots.
+- **Linux:** a desktop session running **X11 (Xorg)**, not Wayland, plus a few system packages. See [Linux: one-time setup](#linux-one-time-setup).
+- **macOS** isn't supported yet.
+
+### For the browser extension
+
+- [Google Chrome](https://www.google.com/chrome/) or [Microsoft Edge](https://www.microsoft.com/edge), a recent version.
+
+### Optional
+
+| For | You need | Where |
 | --- | --- | --- |
-| Records | Clicks and typing inside **browser tabs** | Clicks and typing in **any app**: File Explorer / Files, browsers, Office, Settings, terminals… |
-| Platforms | Chrome, Edge (Windows, Linux, macOS) | Windows 10/11, Linux (X11 session) |
-| Install | Load the `extension` folder into the browser | Run from source, or build an installer |
-| AI write-ups (Gemini / Groq) | — | Optional: Crisp, Elaborate or Conceptual |
-| Save to Notion | — | Optional |
+| AI write-ups in the desktop app | A Google Gemini **or** Groq API key (both have free tiers) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) · [console.groq.com/keys](https://console.groq.com/keys) |
+| Save to Notion from the desktop app | A Notion account and an integration you create | [notion.so/profile/integrations](https://www.notion.so/profile/integrations) |
+
+---
+
+## 2. Which version should I use?
+
+| | Desktop app (recommended) | Chrome / Edge extension |
+| --- | --- | --- |
+| Records | Clicks and typing in **any app**: File Explorer / Files, browsers, Office, Settings, terminals… | Clicks and typing inside **browser tabs** |
+| Platforms | Windows 10/11, Linux (X11 session) | Chrome, Edge (Windows, Linux, macOS) |
+| Install | Run from source, or build an installer | Load the `extension` folder into the browser |
+| Tested | Yes, on Windows (Linux not yet on real hardware) | Automated test in Microsoft Edge only; **not yet tested by hand in Chrome** |
+| AI write-ups (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual | — |
+| Save to Notion | Optional | — |
+| Your own guides folder | Yes | — (stored in the browser) |
 | Light / Dark / System theme | Yes | Yes |
 | Editor and exports | Same | Same |
 
-Pick the **extension** if your process happens entirely in a web browser. Pick the **desktop app** if it involves other programs, such as saving a file in File Explorer, changing a Windows setting or using Excel.
+Start with the **desktop app**: it records everything, including work in other programs such as saving a file in File Explorer, changing a Windows setting or using Excel. The **extension** suits processes that happen entirely in a web browser.
 
-## 2. Get the code
+## 3. Get the code
 
-You need **Node.js 18 or newer** (https://nodejs.org) and **Git**.
+Make sure Node.js and Git are installed ([section 1](#1-before-you-start-what-you-need)), then run these commands in a terminal:
 
 ```bash
 git clone https://github.com/avin045/FlowDoc.git
@@ -53,87 +100,9 @@ npm install
 
 ---
 
-## Guide A: Chrome / Edge extension
+## Guide A: Desktop app (Windows and Linux)
 
-### A1. Install the extension
-
-1. Open your browser's extensions page:
-   - **Chrome:** type `chrome://extensions` in the address bar and press Enter.
-   - **Edge:** type `edge://extensions` in the address bar and press Enter.
-2. Turn on **Developer mode**: a switch at the top-right in Chrome, or in the left sidebar in Edge.
-3. Click **Load unpacked**.
-4. Select the `FlowDoc/extension` folder (the folder that contains `manifest.json`) and confirm.
-5. **FlowDoc — Step Recorder** now appears in the list. Click the puzzle-piece icon in the toolbar, then the pin icon next to FlowDoc, so its icon is always visible.
-
-> Pages that were already open before you installed the extension can't be recorded until you reload them (F5). FlowDoc reloads its recorder into the current tab automatically when you start a capture, so this mostly matters for other tabs.
-
-### A2. Record your first guide
-
-1. Go to the web page where your process starts, for example your company's admin portal.
-2. Click the **FlowDoc** icon in the toolbar. The popup opens.
-3. Click **Start capture**. You can also press `Alt+Shift+R` without opening the popup.
-   - The popup's start button is greyed out on browser pages such as `chrome://…`, the Web Store or the new-tab page. Open a normal website first.
-4. A dark **recorder bar** appears at the bottom-left of the page. It shows the number of captured steps, plus these buttons:
-   - **Pause / Resume**: pause while you do something that shouldn't be in the guide.
-   - **Trash**: discard the whole recording.
-   - **Done**: stop and build the guide.
-5. Do your task normally: click buttons and links, type into fields, choose from dropdowns, tick checkboxes, press Enter. You can move between pages and tabs. The recording keeps going.
-6. Click **Done** on the recorder bar. You can also click **Stop & build guide** in the popup, or press `Alt+Shift+R` again.
-7. A new tab opens with your guide in the **FlowDoc workspace**. Continue with [Guide C](#guide-c-editing-and-exporting-a-guide) to edit and export it.
-
-You can also start a capture from the workspace. Click **New capture** in the left sidebar, then pick an open tab or type a web address.
-
-### A3. What the extension writes for each action
-
-| You do | Step written |
-| --- | --- |
-| Start a capture, or type a URL in the address bar | Navigate to **example.com** |
-| Click a button, link, tab or menu item | Click **Sign in** |
-| Click a text field | Click the **Email** field |
-| Type into a field | Type "jordan@acme.com" in the **Email** field |
-| Type into a password field | Type your password in the **Password** field *(the password is never stored)* |
-| Choose from a dropdown | Select **Europe** from **Region** |
-| Tick a checkbox or toggle | Check **Remember me** / Turn on **Notifications** |
-| Press Enter or Esc | Press **Enter** |
-| Double-click | Double-click **Report.xlsx** |
-
-Each step gets a screenshot. The element you clicked is outlined and the click point is marked with a dot.
-
-### A4. Find your guides again
-
-- Click the FlowDoc icon. The popup lists your **Recent guides**. Click one to open it.
-- Click **My guides ↗** in the popup to open the full library.
-- Guides are stored inside the browser profile, in the extension's storage. To move them to another computer, export a **Backup (.json)** and import it there (see [C7](#c7-manage-your-library)).
-
-### A5. Change the keyboard shortcut
-
-Open `chrome://extensions/shortcuts` (or `edge://extensions/shortcuts`). Find **FlowDoc → Start or stop capturing** and set the key combination you want.
-
-### A6. Update the extension after pulling new code
-
-1. Run `git pull` and then `npm install` in the `FlowDoc` folder.
-2. Open `chrome://extensions` and click the **reload** (circular arrow) icon on the FlowDoc card.
-3. Reload any tabs you want to record.
-
-### A7. Troubleshooting (extension)
-
-| Problem | Fix |
-| --- | --- |
-| **Start capture** is greyed out | You're on a browser-internal page (`chrome://`, the Web Store, the new-tab page). Open a normal website. |
-| Clicks on a page aren't recorded | Reload the page (F5) once after installing or updating the extension. Clicks inside embedded frames (iframes) aren't supported. |
-| A step has no screenshot | The tab wasn't visible at that moment (for example, you switched tabs very quickly). Use **More → Replace screenshot** on that step, or record it again. |
-| The shortcut does nothing | Another extension may use `Alt+Shift+R`. Change it as described in [A5](#a5-change-the-keyboard-shortcut). |
-| "Load unpacked" shows an error about missing files | Run `npm install` first, so that `extension/vendor/` exists. |
-
-### A8. Uninstall
-
-Open `chrome://extensions` and click **Remove** on the FlowDoc card. This also deletes the guides stored in the extension, so export backups first if you want to keep them.
-
----
-
-## Guide B: Desktop app (Windows and Linux)
-
-### B1. Install
+### A1. Install
 
 #### Option 1: Run it from the source code (quickest)
 
@@ -189,7 +158,7 @@ Do this before your first capture on Linux:
 
    `python3-gi` and `gir1.2-atspi-2.0` let FlowDoc read button and field names. Without them, steps fall back to the window title, for example "Click in **Files**".
 
-### B2. Record your first guide
+### A2. Record your first guide
 
 1. Open the programs you'll use, and get to the point where your process starts.
 2. Start a capture in any of these ways:
@@ -209,7 +178,7 @@ Do this before your first capture on Linux:
 
 > **Tip:** move a little slower than usual and pause briefly after typing. The pause lets FlowDoc read the finished text from the field, so the step shows exactly what you typed.
 
-### B3. What the desktop app writes for each action
+### A3. What the desktop app writes for each action
 
 | You do | Step written |
 | --- | --- |
@@ -228,7 +197,7 @@ Under each step the editor shows which app and window it happened in, for exampl
 
 Element names come from the operating system's accessibility features: UI Automation on Windows, AT-SPI on Linux. A few apps don't expose names. For those you'll see "Click in **App name**", and **Improve with AI** (below) can fix the wording from the screenshot.
 
-### B4. Privacy while recording
+### A4. Privacy while recording
 
 - **Passwords:** password fields are detected and their contents are never saved.
 - **The recorder bar** never appears in screenshots on Windows. On Linux it is blurred automatically.
@@ -236,7 +205,7 @@ Element names come from the operating system's accessibility features: UI Automa
 - **Screenshots:** if one shows something private, blur it afterwards with the screenshot editor ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
 - **Typed text:** to keep it out of guides entirely, untick **Settings → Capture → Include typed text in steps**.
 
-### B5. Optional: AI write-ups with Gemini or Groq
+### A5. Optional: AI write-ups with Gemini or Groq
 
 The AI assistant turns recorded steps into polished instructions by looking at each step's screenshot. For example, "Click in **File Explorer**" becomes "Click **New folder** in the toolbar". It also writes a "How to…" title and a short description for the guide. It's optional and off by default, and it uses **your own API key**.
 
@@ -291,7 +260,7 @@ The AI assistant turns recorded steps into polished instructions by looking at e
 - **Failures:** steps that did come back are still applied. If nothing comes back, the dialog stays open with the reason and a **Try again** button.
 - **Rate limits:** free tiers limit requests per minute. FlowDoc retries automatically after a short wait.
 
-### B6. Optional: Save guides to Notion
+### A6. Optional: Save guides to Notion
 
 FlowDoc can turn a guide into a Notion page, with every screenshot uploaded, under any page you choose. Each person connects their own workspace. You don't need a FlowDoc account or a developer setup: just a Notion integration you create in two minutes.
 
@@ -330,7 +299,7 @@ Saving the same guide again creates a new page. Tick **Replace the copy saved on
 
 In Notion, each step becomes a numbered heading with the element name in bold, followed by its note and its screenshot (no captions). Section headings, tips and alerts become Notion headings and callouts. Your Notion secret is encrypted with your system keychain, like the AI keys; **Disconnect** in Settings removes it.
 
-### B7. Capture settings
+### A7. Capture settings
 
 Open **Settings → Capture**:
 
@@ -340,7 +309,7 @@ Open **Settings → Capture**:
 | Include typed text in steps | Shows what you typed, for example Type "Q3 report"… Passwords are always hidden. |
 | Also include keystrokes when the field type can't be detected | For apps that don't report their text fields. Off by default, because FlowDoc can't tell whether such a field holds a password. |
 
-### B8. Where your guides are stored
+### A8. Where your guides are stored
 
 | | Installed app | Running from source (`npm run desktop`) |
 | --- | --- | --- |
@@ -352,15 +321,31 @@ Inside that folder:
 - `library/` holds one JSON file per guide, with the screenshots included.
 - `settings.json` holds your settings and the encrypted API keys and Notion secret.
 
-If you used FlowDoc when it was called StepCraft, its old folder (`%APPDATA%\stepcraft` or `%APPDATA%\StepCraft`) is copied here automatically the first time FlowDoc starts. The old folder is left in place as a backup; delete it once you're happy.
-
 To move guides to another computer, use **Export → Backup (.json)** and **Import**. To back up everything, copy the `library` folder.
 
-### B9. Troubleshooting (desktop)
+#### Use your own guides folder
+
+You can keep your guides anywhere on your computer, for example `C:\Users\you\Documents\FlowDoc` or a folder on another drive. If you never change it, FlowDoc uses the default folder above.
+
+1. Click **Settings** in the sidebar. The **Guides folder** section shows where guides are stored now, marked **Default** or **Custom**.
+2. Click **Change folder…** and pick (or create) a folder.
+   - An empty folder, or one that already holds FlowDoc guides, is used as it is.
+   - If the folder already contains other files, FlowDoc creates a **FlowDoc Guides** folder inside it, so its files don't mix with yours.
+3. FlowDoc shows where guides will go and how many guides that folder already has. Leave **Copy my guides there too** ticked to bring your current guides along. Your current folder is kept untouched as a backup.
+4. Click **Use this folder**. The library reloads from the new folder, and every change is saved there from now on.
+
+Other options:
+
+- **Open folder** opens it in File Explorer or your file manager.
+- **Use default** switches back to the default folder, again offering to copy your guides.
+
+Your settings, API keys and Notion secret always stay in the app's data folder; only guides move. If the chosen folder can't be reached when FlowDoc starts (for example, an external drive that isn't connected), FlowDoc uses the default folder for that session and shows a notice. Reconnect the drive and restart FlowDoc, or choose another folder. You can't change the folder during a capture.
+
+### A9. Troubleshooting (desktop)
 
 | Problem | Fix |
 | --- | --- |
-| **Linux:** nothing is recorded | You're probably on Wayland. Switch to an Xorg session ([B1](#linux-one-time-setup)). Also check that `libxtst6` is installed. |
+| **Linux:** nothing is recorded | You're probably on Wayland. Switch to an Xorg session ([A1](#linux-one-time-setup)). Also check that `libxtst6` is installed. |
 | **Linux:** steps only say "Click in **App**" | Install `python3-gi` and `gir1.2-atspi-2.0`, then restart FlowDoc. Some apps (older Java or Electron apps) don't expose names. Use **Improve with AI**. |
 | **Windows:** steps in one app say "Click in …" | That app is probably running **as administrator**. Run FlowDoc as administrator too (right-click → Run as administrator), or accept the generic text and fix it with AI. |
 | A screenshot is black | The app blocks screen capture. This is common with video streaming services and some banking apps, and nothing can be done from FlowDoc. |
@@ -379,18 +364,98 @@ To move guides to another computer, use **Export → Backup (.json)** and **Impo
 | `npm run dist:win` fails with **EBUSY / resource busy** | Handled automatically. The build runs in a temporary folder and only the finished installers are copied into `dist/`, because programs that watch the project folder (editors, antivirus, the Claude desktop app) can briefly lock files mid-build. If it still fails, close those programs and retry. |
 | `npm run dist:win` fails with **copyfile … elevate.exe: UNKNOWN** | Handled automatically. This happens when your `AppData` folder has the Windows "Encrypted" (EFS) attribute: electron-builder's cached tools inherit it, and Windows Home can't copy encrypted files. The build script now keeps that cache in the temp folder instead. |
 
-### B10. Uninstall
+### A10. Uninstall
 
 - **Installed version:**
   - **Windows:** Settings → Apps → FlowDoc → Uninstall.
   - **Linux:** `sudo apt remove flowdoc`, or delete the AppImage.
-- **Your guides** are kept until you delete the data folder listed in [B8](#b8-where-your-guides-are-stored).
+- **Your guides** are kept until you delete the data folder listed in [A8](#a8-where-your-guides-are-stored).
+
+---
+
+## Guide B: Chrome / Edge extension
+
+> ⚠️ **Not yet tested in Google Chrome.** The extension has only been checked by an automated test that runs it in Microsoft Edge. Nobody has tried it by hand in Chrome yet, so expect rough edges, and please report anything that doesn't work. If you can, use the [desktop app](#guide-a-desktop-app-windows-and-linux) instead: it has been tested on Windows and records far more.
+
+### B1. Install the extension
+
+1. Open your browser's extensions page:
+   - **Chrome:** type `chrome://extensions` in the address bar and press Enter.
+   - **Edge:** type `edge://extensions` in the address bar and press Enter.
+2. Turn on **Developer mode**: a switch at the top-right in Chrome, or in the left sidebar in Edge.
+3. Click **Load unpacked**.
+4. Select the `FlowDoc/extension` folder (the folder that contains `manifest.json`) and confirm.
+5. **FlowDoc — Step Recorder** now appears in the list. Click the puzzle-piece icon in the toolbar, then the pin icon next to FlowDoc, so its icon is always visible.
+
+> Pages that were already open before you installed the extension can't be recorded until you reload them (F5). FlowDoc reloads its recorder into the current tab automatically when you start a capture, so this mostly matters for other tabs.
+
+### B2. Record your first guide
+
+1. Go to the web page where your process starts, for example your company's admin portal.
+2. Click the **FlowDoc** icon in the toolbar. The popup opens.
+3. Click **Start capture**. You can also press `Alt+Shift+R` without opening the popup.
+   - The popup's start button is greyed out on browser pages such as `chrome://…`, the Web Store or the new-tab page. Open a normal website first.
+4. A dark **recorder bar** appears at the bottom-left of the page. It shows the number of captured steps, plus these buttons:
+   - **Pause / Resume**: pause while you do something that shouldn't be in the guide.
+   - **Trash**: discard the whole recording.
+   - **Done**: stop and build the guide.
+5. Do your task normally: click buttons and links, type into fields, choose from dropdowns, tick checkboxes, press Enter. You can move between pages and tabs. The recording keeps going.
+6. Click **Done** on the recorder bar. You can also click **Stop & build guide** in the popup, or press `Alt+Shift+R` again.
+7. A new tab opens with your guide in the **FlowDoc workspace**. Continue with [Guide C](#guide-c-editing-and-exporting-a-guide) to edit and export it.
+
+You can also start a capture from the workspace. Click **New capture** in the left sidebar, then pick an open tab or type a web address.
+
+### B3. What the extension writes for each action
+
+| You do | Step written |
+| --- | --- |
+| Start a capture, or type a URL in the address bar | Navigate to **example.com** |
+| Click a button, link, tab or menu item | Click **Sign in** |
+| Click a text field | Click the **Email** field |
+| Type into a field | Type "jordan@acme.com" in the **Email** field |
+| Type into a password field | Type your password in the **Password** field *(the password is never stored)* |
+| Choose from a dropdown | Select **Europe** from **Region** |
+| Tick a checkbox or toggle | Check **Remember me** / Turn on **Notifications** |
+| Press Enter or Esc | Press **Enter** |
+| Double-click | Double-click **Report.xlsx** |
+
+Each step gets a screenshot. The element you clicked is outlined and the click point is marked with a dot.
+
+### B4. Find your guides again
+
+- Click the FlowDoc icon. The popup lists your **Recent guides**. Click one to open it.
+- Click **My guides ↗** in the popup to open the full library.
+- Guides are stored inside the browser profile, in the extension's storage. To move them to another computer, export a **Backup (.json)** and import it there (see [C8](#c8-manage-your-library)).
+
+### B5. Change the keyboard shortcut
+
+Open `chrome://extensions/shortcuts` (or `edge://extensions/shortcuts`). Find **FlowDoc → Start or stop capturing** and set the key combination you want.
+
+### B6. Update the extension after pulling new code
+
+1. Run `git pull` and then `npm install` in the `FlowDoc` folder.
+2. Open `chrome://extensions` and click the **reload** (circular arrow) icon on the FlowDoc card.
+3. Reload any tabs you want to record.
+
+### B7. Troubleshooting (extension)
+
+| Problem | Fix |
+| --- | --- |
+| **Start capture** is greyed out | You're on a browser-internal page (`chrome://`, the Web Store, the new-tab page). Open a normal website. |
+| Clicks on a page aren't recorded | Reload the page (F5) once after installing or updating the extension. Clicks inside embedded frames (iframes) aren't supported. |
+| A step has no screenshot | The tab wasn't visible at that moment (for example, you switched tabs very quickly). Use **More → Replace screenshot** on that step, or record it again. |
+| The shortcut does nothing | Another extension may use `Alt+Shift+R`. Change it as described in [B5](#b5-change-the-keyboard-shortcut). |
+| "Load unpacked" shows an error about missing files | Run `npm install` first, so that `extension/vendor/` exists. |
+
+### B8. Uninstall
+
+Open `chrome://extensions` and click **Remove** on the FlowDoc card. This also deletes the guides stored in the extension, so export backups first if you want to keep them.
 
 ---
 
 ## Guide C: Editing and exporting a guide
 
-The editor works the same in the extension and the desktop app. Every change saves automatically, and the top bar shows **All changes saved**.
+The editor works the same in the desktop app and the extension. Every change saves automatically, and the top bar shows **All changes saved**.
 
 ### C1. Title and description
 
@@ -506,7 +571,7 @@ npm run test:desktop
 - **`npm run test:desktop`** launches the desktop app and opens the demo site in a window. It feeds the recorder hook events at real element positions, so screen capture and the accessibility inspector run for real without moving your mouse. It also:
   - checks step text, password masking, double-click, right-click and shortcuts;
   - runs **Improve with AI** in all three styles against mock Gemini and Groq servers, including a background run that finishes after you've left the guide, and checks keys, models, JSON mode, model fallback and the no-invented-values guard;
-  - checks the model dropdown, the theme switch, and data carried over from StepCraft;
+  - checks the model dropdown, the theme switch, the custom guides folder, and data carried over from an older data folder;
   - saves the guide to a mock Notion server, checking the version header, multipart uploads, the parent page and block chunking;
   - runs every export inside the desktop app.
 
@@ -567,6 +632,7 @@ scripts/               vendor copy, icon render, static server, tests
   - Plain text labels on web pages (for example, clicking the words next to a checkbox) sometimes resolve only to the page title. **Improve with AI** names them correctly from the screenshot.
   - Apps running as administrator can't be inspected from a non-elevated FlowDoc. Their clicks are still captured, with generic text.
 - **Extension**
+  - Not yet tested by hand in Google Chrome; only an automated test in Microsoft Edge has run.
   - Clicks inside iframes and on browser-internal pages (`chrome://`, the Web Store) aren't recorded.
   - The built-in PDF export only supports Latin text. Use **Print → Save as PDF** for other scripts.
 - **Both:** there is no cloud sharing or share links. Share the exported files instead.

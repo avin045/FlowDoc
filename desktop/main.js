@@ -1,7 +1,7 @@
 // FlowDoc desktop (Windows + Linux). Hosts the same workspace UI as the
 // browser extension, but records clicks and keystrokes in every application
 // (file manager, browsers, Office, settings...) instead of one browser tab.
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray } from 'electron';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,7 +12,7 @@ import { createCapture } from './capture.js';
 import { createInspector } from './inspector/index.js';
 import { createRecorder } from './recorder.js';
 import { createSettings } from './settings.js';
-import { createFileStore } from './store.js';
+import { createFileStore, ensureWritable, folderUsable, inspectFolder, mergeLibrary } from './store.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -59,7 +59,13 @@ let widgetWin = null;
 let tray = null;
 let quitting = false;
 
-const store = createFileStore(join(app.getPath('userData'), 'library'), {
+// Guides live here unless the user picks their own folder in Settings.
+const DEFAULT_LIBRARY = join(app.getPath('userData'), 'library');
+// Set when the chosen folder can't be reached at startup (e.g. an unplugged
+// drive): FlowDoc then uses the default folder and says so.
+let storageFallback = null;
+
+const store = createFileStore(DEFAULT_LIBRARY, {
   onChange: (key, source) => {
     if (source !== 'ui' && mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('kv:changed', { key });
   },
@@ -278,6 +284,38 @@ function registerIpc() {
     mainWin?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0b1120' : '#f6f7fb');
     settings.update({ ui: { theme: source } }).catch(() => {});
   });
+  // ---------- guides folder ----------
+  const storageInfo = async () => ({
+    dir: store.dir,
+    defaultDir: DEFAULT_LIBRARY,
+    isDefault: store.dir === DEFAULT_LIBRARY,
+    guides: ((await store.get('guides_index')) || []).length,
+    fallback: storageFallback,
+  });
+  const switchLibrary = async (target, { copy = true } = {}) => {
+    if (recorder.state.active) throw new Error('Finish the capture first, then change the guides folder.');
+    if (!(await ensureWritable(target))) throw new Error("FlowDoc can't write to that folder. Choose one you have permission to change.");
+    const copied = copy ? await mergeLibrary(store.dir, target) : 0;
+    await store.setDir(target);
+    await settings.update({ storage: { libraryDir: target === DEFAULT_LIBRARY ? '' : target } });
+    storageFallback = null;
+    return { ...(await storageInfo()), copied };
+  };
+  ipcMain.handle('storage:get', storageInfo);
+  ipcMain.handle('storage:inspect', (_e, folder) => inspectFolder(String(folder || '')));
+  ipcMain.handle('storage:choose', async () => {
+    const res = await dialog.showOpenDialog(mainWin, {
+      title: 'Choose a folder for your FlowDoc guides',
+      defaultPath: store.dir,
+      buttonLabel: 'Use this folder',
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+    });
+    return res.canceled || !res.filePaths[0] ? null : inspectFolder(res.filePaths[0]);
+  });
+  ipcMain.handle('storage:apply', (_e, { target, copy }) => switchLibrary(target, { copy }));
+  ipcMain.handle('storage:reset', (_e, { copy } = {}) => switchLibrary(DEFAULT_LIBRARY, { copy }));
+  ipcMain.handle('storage:open', () => shell.openPath(store.dir));
+
   ipcMain.handle('shell:openExternal', (_e, url) => {
     if (/^https:\/\//.test(url)) return shell.openExternal(url);
   });
@@ -296,6 +334,15 @@ app.whenReady().then(async () => {
   });
 
   registerIpc();
+  // Use the guides folder chosen in Settings, if it's reachable.
+  const libraryDir = (await settings.get()).storage?.libraryDir;
+  if (libraryDir && libraryDir !== DEFAULT_LIBRARY) {
+    if (await folderUsable(libraryDir)) await store.setDir(libraryDir);
+    else {
+      storageFallback = { wanted: libraryDir };
+      log(`guides folder ${libraryDir} is not available; using ${DEFAULT_LIBRARY}`);
+    }
+  }
   // Apply the saved theme before the first window paints.
   nativeTheme.themeSource = (await settings.get()).ui?.theme || 'system';
   createMainWindow();
