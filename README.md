@@ -15,6 +15,7 @@ Everything runs on your computer. There is no account and no server. The only da
 7. [Web workspace (no install)](#web-workspace-no-install)
 8. [For developers](#for-developers)
 9. [Limitations](#limitations)
+10. [License](#license)
 
 ---
 
@@ -636,3 +637,11 @@ scripts/               vendor copy, icon render, static server, tests
   - Clicks inside iframes and on browser-internal pages (`chrome://`, the Web Store) aren't recorded.
   - The built-in PDF export only supports Latin text. Use **Print → Save as PDF** for other scripts.
 - **Both:** there is no cloud sharing or share links. Share the exported files instead.
+
+---
+
+## License
+
+FlowDoc is licensed under the [Apache License, Version 2.0](LICENSE). You may use, modify and distribute it, including commercially, provided you keep the license and copyright notices. See the [LICENSE](LICENSE) file for the full terms.
+
+Copyright 2026 avin045.
