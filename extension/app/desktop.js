@@ -82,7 +82,6 @@ export async function openSettingsDialog({ toast, onClose }) {
           <span class="test-result hint"></span>
         </div>
       </div>
-      <label class="check"><input type="checkbox" name="autoEnhance"> Improve new guides automatically when a capture ends</label>
     </div>
 
     <h3>Notion <span class="pill">Optional</span></h3>
@@ -125,7 +124,6 @@ export async function openSettingsDialog({ toast, onClose }) {
       $('.key-hint').innerHTML = `Get a key at <a href="#" data-url="${s.providers[p].keyUrl}">${escapeHtml(s.providers[p].keyUrl.replace('https://', ''))}</a>`;
       fillModels();
     }
-    f.autoEnhance.checked = s.ai.autoEnhance;
     f.hideWindow.checked = s.capture.hideWindow;
     f.typedText.checked = s.capture.typedText;
     f.unknownFieldText.checked = s.capture.unknownFieldText;
@@ -174,7 +172,6 @@ export async function openSettingsDialog({ toast, onClose }) {
   f.customModel.addEventListener('change', () => {
     if (f.customModel.value.trim()) save({ ai: { models: { [s.ai.provider]: f.customModel.value.trim() } } });
   });
-  for (const name of ['autoEnhance']) f[name].addEventListener('change', () => save({ ai: { [name]: f[name].checked } }));
   for (const name of ['hideWindow', 'typedText', 'unknownFieldText'])
     f[name].addEventListener('change', async () => {
       await save({ capture: { [name]: f[name].checked } });

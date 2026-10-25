@@ -254,6 +254,9 @@ check(texts.some((t) => t === 'Press **Enter**'), 'Enter key captured');
 check(texts.some((t) => t === 'Press **Ctrl+S**'), 'keyboard shortcut captured');
 check(r.guide.steps.some((s) => s.app), 'app name recorded', r.guide.steps.find((s) => s.app)?.app);
 check(/Workflow in/.test(r.guide.title), 'default title from apps', r.guide.title);
+const ac = r.afterCapture || {};
+check(ac.guideOpen && !ac.aiDialog && !ac.aiBanner, 'a finished capture opens the guide without starting AI', JSON.stringify(ac));
+check(ac.autoSettingKept === false, 'the old "improve automatically" setting is ignored and dropped');
 
 console.log('\nAI client');
 check(direct.thinkingRejected.ok && direct.thinkingRejected.model === 'gemini-legacy', 'models that reject thinking settings are retried with defaults');

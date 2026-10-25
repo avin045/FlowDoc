@@ -27,7 +27,6 @@ const DEFAULTS = {
     models: { gemini: AI_PROVIDERS.gemini.defaultModel, groq: AI_PROVIDERS.groq.defaultModel },
     modelLists: {}, // provider -> model IDs from the last "Load models"
     style: 'elaborate', // 'crisp' | 'elaborate' | 'conceptual'
-    autoEnhance: false,
   },
   notion: {
     // Locations are { id, title, path, crumbs: [{ id, title }] }.

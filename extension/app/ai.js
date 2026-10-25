@@ -112,7 +112,7 @@ function batchPrompt(batch, prev, style, context) {
     `Rewrite these ${batch.length} recorded steps of a how-to guide.`,
     context?.goal ? `The guide's overall goal: ${context.goal}` : '',
     context?.audience ? `Written for: ${context.audience}` : '',
-    cfg.images ? 'Each attached screenshot shows the area around one action; a red outline and dot mark the exact element that was clicked or typed into.' : '',
+    cfg.images ? 'Each attached screenshot shows the area around one action; a red outline marks the element that was clicked or typed into, and a red ring marks the exact click point.' : '',
     prev ? `The step before these was: ${plainText(prev.text)}` : '',
     '',
     'Steps:',

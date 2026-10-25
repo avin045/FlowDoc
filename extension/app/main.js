@@ -1228,11 +1228,11 @@ if (isDesktop) {
   desktop.recorder.onState(renderCta);
   desktop.recorder.state().then(renderCta);
 
+  // A finished capture just opens the guide. AI only runs when the user
+  // clicks "Improve with AI".
   desktop.recorder.onFinished(async ({ guideId }) => {
     location.hash = `#/guide/${guideId}`;
     await route();
-    const s = await desktop.settings.get();
-    if (s.ai.autoEnhance && current?.id === guideId && (await aiEnabled())) runAiImprove(true);
   });
 
   const settingsBtn = h(`<button class="nav-item settings-btn">${I.gear} Settings</button>`);
