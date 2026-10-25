@@ -2,6 +2,7 @@
   "name": "flowdoc",
   "version": "1.0.0",
   "description": "FlowDoc - record workflows (browser extension or Windows/Linux desktop app) into step-by-step guides; export to HTML, PDF, Word or Markdown",
+  "desktopName": "flowdoc.desktop",
   "license": "Apache-2.0",
   "scripts": {
     "vendor": "node scripts/vendor.mjs",
@@ -10,6 +11,7 @@
     "test": "node scripts/e2e.mjs",
     "desktop": "electron .",
     "test:desktop": "node scripts/desktop-test.mjs",
+    "dist": "node scripts/dist.mjs",
     "dist:win": "node scripts/dist.mjs --win",
     "dist:linux": "node scripts/dist.mjs --linux",
     "postinstall": "node scripts/vendor.mjs"
@@ -78,7 +80,8 @@
       "category": "Office",
       "icon": "build/icon.png",
       "synopsis": "Record any workflow into a step-by-step guide",
-      "executableName": "flowdoc"
+      "executableName": "flowdoc",
+      "syncDesktopName": true
     },
     "deb": {
       "depends": [

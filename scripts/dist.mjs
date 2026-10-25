@@ -1,4 +1,13 @@
-// Builds the desktop installers.   node scripts/dist.mjs --win | --linux
+// Builds the desktop installers.
+//   npm run dist         installers for the system you're on
+//   npm run dist:win     Windows installers (on Windows)
+//   npm run dist:linux   Linux .AppImage and .deb (on Linux)
+//
+// Each system can only build its own installers: Linux packages need Linux
+// file links and packaging tools that Windows doesn't have, and the Windows
+// installer needs Windows tools. Asking for the other system stops right away
+// with what to do instead; GitHub Actions (.github/workflows/build.yml) builds
+// both in the cloud for people with only one kind of machine.
 //
 // electron-builder deletes and rewrites thousands of files while packaging.
 // Anything that watches the project folder (an editor's file indexer, an
@@ -16,7 +25,35 @@ const { build, Platform } = builder;
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-const platform = process.argv.includes('--linux') ? 'linux' : process.argv.includes('--win') ? 'win' : process.platform === 'linux' ? 'linux' : 'win';
+const host = process.platform === 'win32' ? 'win' : process.platform === 'linux' ? 'linux' : null;
+const platform = process.argv.includes('--linux') ? 'linux' : process.argv.includes('--win') ? 'win' : host;
+const NAME = { win: 'Windows', linux: 'Linux' };
+
+if (!host) {
+  console.error('FlowDoc installers can be built on Windows or Linux. This system (macOS) is not supported yet.');
+  process.exit(1);
+}
+if (platform !== host) {
+  console.error(
+    [
+      '',
+      `${NAME[platform]} installers can't be built on ${NAME[host]}.`,
+      platform === 'linux'
+        ? "Linux packages (.AppImage, .deb) need Linux file links and packaging tools that Windows doesn't have."
+        : "The Windows installer needs Windows packaging tools that Linux doesn't have.",
+      '',
+      `To install FlowDoc on this ${NAME[host]} computer, run:`,
+      '',
+      '    npm run dist',
+      '',
+      `To get ${NAME[platform]} installers without a ${NAME[platform]} computer, use the "Build installers"`,
+      'workflow on GitHub: open the repository > Actions > Build installers > Run workflow,',
+      'then download the files from the finished run (see "Build installers in the cloud" in README.md).',
+      '',
+    ].join('\n'),
+  );
+  process.exit(1);
+}
 const work = join(tmpdir(), `flowdoc-build-${platform}`);
 const dist = join(root, 'dist');
 
