@@ -37,7 +37,9 @@ async function ask(prompt, images = []) {
 // base64 JPEG (≤768 px wide keeps uploads and model latency low).
 async function stepImage(step) {
   if (!step.screenshot) return null;
-  const full = await renderStepCanvas({ ...step, crop: null }, { crop: false });
+  // Always the full marks (outline + ring), whatever the display setting: the
+  // model relies on them to see what was clicked.
+  const full = await renderStepCanvas({ ...step, crop: null }, { crop: false, highlightStyle: 'normal', forceHighlight: true });
   const W = full.width;
   const H = full.height;
   const scale = step.shot?.viewportW ? W / step.shot.viewportW : 1;

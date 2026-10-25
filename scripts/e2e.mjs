@@ -162,6 +162,19 @@ try {
   const afterRedo = (await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId)).steps.map((s) => s.id).join();
   check(afterRedo === orderBefore, 'redo re-applies it');
 
+  // "Highlights" toolbar toggle hides, then shows, the marks on every step.
+  const markedHidden = async () =>
+    (await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId)).steps
+      .filter((s) => s.kind === 'action' && s.screenshot && (s.target || s.click))
+      .map((s) => s.highlight === false);
+  await app.click('[data-act="highlights"]');
+  await app.waitForTimeout(800);
+  const hidden = await markedHidden();
+  check(hidden.length > 0 && hidden.every(Boolean), 'Highlights toggle hides the mark on every step', `${hidden.length} steps`);
+  await app.click('[data-act="highlights"]');
+  await app.waitForTimeout(800);
+  check((await markedHidden()).every((h) => !h), 'Highlights toggle shows them again');
+
   await app.evaluate(() => window.scrollTo(0, 0));
   await app.screenshot({ path: join(out, 'editor-edited.png'), fullPage: true });
 

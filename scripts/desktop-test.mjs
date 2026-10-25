@@ -329,6 +329,18 @@ check(allBlocks.some((b) => b.type === 'heading_2' && b.heading_2.rich_text[0].t
 check(allBlocks.some((b) => b.type === 'heading_3' && b.heading_3.rich_text.some((t) => t.annotations.bold)), 'steps keep their bold element names');
 check(n.stored?.url === 'https://www.notion.so/page-new' && n.stored?.parentPath === FULL, 'the Notion link is saved on the guide');
 
+console.log('\nClick highlights');
+const hl = r.highlight || {};
+check(hl.normal?.ring && hl.normal.box && hl.normal.centreClear, 'Normal: outline + ring, with a see-through centre', JSON.stringify(hl.normal));
+check(hl.box?.box && !hl.box.ring, 'Box only: outline, no ring', JSON.stringify(hl.box));
+check(hl.none && !hl.none.box && !hl.none.ring, 'None: no marks', JSON.stringify(hl.none));
+check(hl.aiCrop?.ring && hl.aiCrop.box, 'AI screenshots keep full marks even with "None" and a hidden step');
+check(JSON.stringify(hl.settings?.options) === '["normal","box","none"]' && hl.settings.checked === 'normal', 'Settings offers Normal / Box only / None (Normal by default)', JSON.stringify(hl.settings?.options));
+check(hl.settings?.saved === 'none' && hl.settings.toolbarWhenNone?.disabled, 'choosing None is saved and disables the toolbar toggle');
+check(hl.toggle?.before?.pressed === 'true', 'toolbar shows a Highlights toggle, on by default', JSON.stringify(hl.toggle?.before));
+check(hl.toggle?.afterHide?.allHidden && hl.toggle.afterHide.button.pressed === 'false' && hl.toggle.afterHide.button.label === 'Highlights off', 'one click hides the highlight on every step', JSON.stringify(hl.toggle?.afterHide));
+check(hl.toggle?.afterShow?.allShown && hl.toggle.afterShow.button.pressed === 'true', 'clicking again shows them on every step');
+
 console.log('\nGuides folder');
 const st = r.storage || {};
 check(st.before?.isDefault && st.before.guides >= 2, 'starts in the default folder', JSON.stringify(st.before));

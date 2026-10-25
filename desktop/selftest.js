@@ -128,10 +128,18 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     widget.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(pt.x), y: Math.round(pt.y), button: 'left', clickCount: 1 });
     await sleep(500);
   };
+  // Wait for the recorder to actually change state rather than a fixed delay:
+  // the bar ignores a second press while the first is still being handled.
+  const untilPaused = async (want) => {
+    for (let i = 0; i < 30 && recorder.state.paused !== want; i++) await sleep(100);
+    return recorder.state.paused === want;
+  };
   await press(results.widget.toggle);
-  results.widget.pausedAfterClick = recorder.state.paused;
+  results.widget.pausedAfterClick = await untilPaused(true);
+  await sleep(200); // let the bar re-enable its button
   await press(results.widget.toggle);
-  results.widget.resumedAfterClick = !recorder.state.paused;
+  results.widget.resumedAfterClick = await untilPaused(false);
+  if (recorder.state.paused) recorder.setPaused(false); // never record the rest of the test paused
 
   await click('#email');
   await type('alex@northwind.example');
@@ -398,6 +406,64 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     const keptChoice = (await createSettings(file).get()).ai.models.gemini;
     results.migration = { model, keptChoice };
   }
+
+  // ---------- click highlight styles + "Highlights" toolbar toggle ----------
+  progress('click highlights');
+  await openGuide();
+  results.highlight = await js(`(async () => {
+    const { renderStepCanvas, setHighlightStyle } = await import('/app/render.js');
+    const g = await window.flowdocApp.getGuide(${JSON.stringify(guideId)});
+    const step = g.steps.find((s) => s.click && s.target && s.target.w > 40);
+    const isRed = (p) => p[0] > 170 && p[1] < 120 && p[2] < 150;
+    const sample = async (style, opts = {}, override = {}) => {
+      if (style) setHighlightStyle(style);
+      const c = await renderStepCanvas({ ...step, ...override }, { crop: false, ...opts });
+      const scale = c.width / step.shot.viewportW;
+      const ctx = c.getContext('2d');
+      const px = (x, y) => ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+      const cx = step.click.x * scale, cy = step.click.y * scale;
+      const ringHits = [0, 90, 180, 270].filter((deg) => {
+        const a = (deg * Math.PI) / 180;
+        return isRed(px(cx + Math.cos(a) * 15 * scale, cy + Math.sin(a) * 15 * scale));
+      }).length;
+      const t = step.target;
+      const boxHit = isRed(px(t.x * scale - 4 * scale, (t.y + t.h / 2) * scale));
+      return { ring: ringHits >= 3, centreClear: !isRed(px(cx, cy)), box: boxHit };
+    };
+    const out = {
+      normal: await sample('normal'),
+      box: await sample('box'),
+      none: await sample('none'),
+      // The AI always gets full marks, even with "None" and a hidden step.
+      aiCrop: await sample('none', { highlightStyle: 'normal', forceHighlight: true }, { highlight: false }),
+    };
+    setHighlightStyle('normal');
+    return out;
+  })()`);
+
+  // Toolbar toggle: hide on every step, then show again.
+  const marked = async () => (await getGuide(guideId)).steps.filter((s) => s.kind === 'action' && s.screenshot && (s.target || s.click));
+  const btnState = () => js(`(() => { const b = document.querySelector('[data-act="highlights"]'); return b ? { pressed: b.getAttribute('aria-pressed'), label: b.querySelector('.label').textContent, disabled: b.disabled } : null; })()`);
+  results.highlight.toggle = { before: await btnState() };
+  await js(`document.querySelector('[data-act="highlights"]').click()`);
+  await sleep(900);
+  results.highlight.toggle.afterHide = { button: await btnState(), allHidden: (await marked()).every((s) => s.highlight === false) };
+  await shot(mainWin, 'desktop-highlights-off.png');
+  await js(`document.querySelector('[data-act="highlights"]').click()`);
+  await sleep(900);
+  results.highlight.toggle.afterShow = { button: await btnState(), allShown: (await marked()).every((s) => s.highlight !== false) };
+
+  // Settings: the three cards, and "None" disables the toolbar toggle.
+  await js(`document.querySelector('.settings-btn').click()`);
+  await waitFor(() => js(`!!document.querySelector('dialog [name="hlStyle"]')`));
+  results.highlight.settings = await js(`({ options: [...document.querySelectorAll('dialog [name="hlStyle"]')].map((r) => r.value), checked: document.querySelector('dialog [name="hlStyle"]:checked')?.value })`);
+  await js(`document.querySelector('dialog [name="hlStyle"][value="none"]').click()`);
+  await sleep(500);
+  await shot(mainWin, 'desktop-settings-highlight.png');
+  results.highlight.settings.saved = await js(`localStorage.getItem('flowdoc.highlightStyle')`);
+  results.highlight.settings.toolbarWhenNone = await btnState();
+  await js(`document.querySelector('dialog [name="hlStyle"][value="normal"]').click(); document.querySelector('dialog [data-close]').click();`);
+  await sleep(400);
 
   // ---------- custom guides folder ----------
   progress('guides folder');

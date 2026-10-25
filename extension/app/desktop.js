@@ -3,7 +3,7 @@
 import { STYLES, testConnection } from './ai.js';
 import { cancelJob, estimateRemaining, getJob, onJobChange, startJob } from './aiJobs.js';
 import { CONNECT_STEPS } from './notion.js';
-import { escapeHtml, isNumbered } from './render.js';
+import { escapeHtml, getHighlightStyle, isNumbered, setHighlightStyle } from './render.js';
 
 const desktop = globalThis.flowdocDesktop;
 
@@ -101,6 +101,14 @@ export async function openSettingsDialog({ toast, onClose }) {
         <button type="button" class="ghost danger" data-act="disconnectNotion">Disconnect</button>
         <span class="notion-result hint"></span>
       </div>
+    </div>
+
+    <h3>Click highlight</h3>
+    <p class="hint">How clicks are marked on screenshots, in the editor and in every export. To hide marks in one guide only, use <b>Highlights</b> in that guide's toolbar.</p>
+    <div class="hl-styles" role="radiogroup" aria-label="Click highlight style">
+      <label class="hl-card"><input type="radio" name="hlStyle" value="normal"><strong>Normal</strong><span>Outline around the clicked element and a ring where you clicked</span></label>
+      <label class="hl-card"><input type="radio" name="hlStyle" value="box"><strong>Box only</strong><span>Just the outline around the clicked element</span></label>
+      <label class="hl-card"><input type="radio" name="hlStyle" value="none"><strong>None</strong><span>No marks on screenshots</span></label>
     </div>
 
     <h3>Capture</h3>
@@ -281,6 +289,12 @@ export async function openSettingsDialog({ toast, onClose }) {
     btn.disabled = false;
   });
   renderFolder();
+
+  // ---------- click highlight style ----------
+  dlg.querySelectorAll('[name="hlStyle"]').forEach((r) => {
+    r.checked = r.value === getHighlightStyle();
+    r.addEventListener('change', () => r.checked && setHighlightStyle(r.value));
+  });
 
   $('[data-act="saveNotion"]').addEventListener('click', async () => {
     const token = f.notionToken.value.trim();
