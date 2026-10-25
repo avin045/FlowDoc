@@ -42,6 +42,9 @@ const DEFAULTS = {
   ui: {
     theme: 'system', // 'system' | 'light' | 'dark'
   },
+  storage: {
+    libraryDir: '', // empty = the default folder inside the app's data folder
+  },
   migrations: {},
 };
 

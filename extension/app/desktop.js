@@ -27,6 +27,25 @@ export async function openSettingsDialog({ toast, onClose }) {
     <h2>Settings</h2>
     <p class="sub">Everything stays on this computer. API keys are encrypted with your system keychain${s.secureStorage ? '' : ' <b>(keychain unavailable: stored obfuscated only)</b>'}.</p>
 
+    <h3>Guides folder</h3>
+    <p class="hint">Where FlowDoc keeps your guides on this computer. Choose any folder, for example in Documents or on another drive.</p>
+    <div class="folder-box"><span class="folder-path"></span><span class="pill folder-kind"></span></div>
+    <p class="notice folder-warning" hidden></p>
+    <div class="inline folder-actions">
+      <button type="button" class="secondary" data-act="chooseFolder">Change folder…</button>
+      <button type="button" class="ghost" data-act="openFolder">Open folder</button>
+      <button type="button" class="ghost" data-act="resetFolder">Use default</button>
+    </div>
+    <div class="folder-confirm" hidden>
+      <p class="confirm-text"></p>
+      <label class="check copy-row"><input type="checkbox" name="copyGuides" checked> <span class="copy-label"></span></label>
+      <div class="inline">
+        <button type="button" class="primary" data-act="applyFolder">Use this folder</button>
+        <button type="button" class="ghost" data-act="cancelFolder">Cancel</button>
+      </div>
+    </div>
+    <p class="error-text folder-error" hidden></p>
+
     <h3>AI assistant <span class="pill">Optional</span></h3>
     <p class="hint">Rewrites step instructions from the screenshots and writes the guide title and description. Uses your own API key; screenshots of each step are sent to the provider you choose.</p>
     <div class="field-row">
@@ -202,6 +221,70 @@ export async function openSettingsDialog({ toast, onClose }) {
     }
     btn.disabled = false;
   });
+  // ---------- guides folder ----------
+  let folder = null; // { dir, defaultDir, isDefault, guides, fallback }
+  let pendingFolder = null; // inspected target waiting for confirmation
+  const folderError = (msg) => {
+    $('.folder-error').hidden = !msg;
+    $('.folder-error').textContent = msg || '';
+  };
+  async function renderFolder() {
+    folder = await desktop.storage.get();
+    $('.folder-path').textContent = folder.dir;
+    $('.folder-kind').textContent = folder.isDefault ? 'Default' : 'Custom';
+    $('[data-act="resetFolder"]').hidden = folder.isDefault;
+    const warn = $('.folder-warning');
+    warn.hidden = !folder.fallback;
+    if (folder.fallback) warn.textContent = `Your guides folder ${folder.fallback.wanted} isn't available right now (for example, a drive that isn't connected), so FlowDoc is using the default folder. Reconnect it and restart FlowDoc, or choose another folder.`;
+  }
+  function confirmFolder(info, isReset) {
+    pendingFolder = { ...info, isReset };
+    const parts = [isReset ? `Guides will be stored in the default folder again: ${info.target}.` : `Guides will be stored in ${info.target}.`];
+    if (info.subfolder) parts.push('A “FlowDoc Guides” folder is created inside the folder you picked, so your own files stay separate.');
+    if (info.existingGuides) parts.push(`It already has ${info.existingGuides} FlowDoc guide${info.existingGuides === 1 ? '' : 's'}; they'll appear in your library.`);
+    $('.confirm-text').textContent = parts.join(' ');
+    $('.copy-label').textContent = `Copy my ${folder.guides} guide${folder.guides === 1 ? '' : 's'} there too (the current folder is kept as a backup)`;
+    $('.copy-row').hidden = !folder.guides;
+    f.copyGuides.checked = true;
+    $('.folder-confirm').hidden = false;
+    $('.folder-actions').hidden = true;
+  }
+  const closeConfirm = () => {
+    pendingFolder = null;
+    $('.folder-confirm').hidden = true;
+    $('.folder-actions').hidden = false;
+  };
+  $('[data-act="chooseFolder"]').addEventListener('click', async () => {
+    folderError('');
+    const info = await desktop.storage.choose();
+    if (!info) return;
+    if (!info.ok) return folderError(info.reason);
+    if (info.target === folder.dir) return folderError('FlowDoc is already using that folder.');
+    confirmFolder(info, false);
+  });
+  $('[data-act="resetFolder"]').addEventListener('click', async () => {
+    folderError('');
+    confirmFolder(await desktop.storage.inspect(folder.defaultDir), true);
+  });
+  $('[data-act="cancelFolder"]').addEventListener('click', closeConfirm);
+  $('[data-act="openFolder"]').addEventListener('click', () => desktop.storage.open());
+  $('[data-act="applyFolder"]').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const copy = folder.guides > 0 && f.copyGuides.checked;
+      const res = pendingFolder.isReset ? await desktop.storage.reset({ copy }) : await desktop.storage.apply({ target: pendingFolder.target, copy });
+      closeConfirm();
+      await renderFolder();
+      toast(`Guides are now stored in ${res.dir}${res.copied ? ` (${res.copied} copied)` : ''}`);
+      location.hash = '#/'; // show the library from the new folder
+    } catch (err) {
+      folderError(cleanError(err));
+    }
+    btn.disabled = false;
+  });
+  renderFolder();
+
   $('[data-act="saveNotion"]').addEventListener('click', async () => {
     const token = f.notionToken.value.trim();
     if (!token) return toast('Paste your Notion secret first', { error: true });

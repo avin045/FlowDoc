@@ -198,6 +198,15 @@ async function renderHome() {
       h(`<div class="notice">You're on a Wayland session. Linux only lets apps see clicks in other windows on X11, so log in with an <b>Xorg/X11</b> session (gear icon on the login screen) for full capture.</div>`),
     );
   }
+  if (isDesktop) {
+    // The guides folder chosen in Settings couldn't be reached at startup.
+    desktop.storage.get().then((info) => {
+      if (!info.fallback || !$('.home-head', view)) return;
+      const note = h('<div class="notice"></div>');
+      note.textContent = `Your guides folder ${info.fallback.wanted} isn't available (for example, a drive that isn't connected), so FlowDoc is showing the default folder for now. Reconnect it and restart FlowDoc, or choose another folder in Settings.`;
+      $('.home-head', view).after(note);
+    });
+  }
   $('[data-act="import"]', view).addEventListener('click', importGuide);
   $('[data-act="blank"]', view).addEventListener('click', async () => {
     const guide = createGuide({ title: '', steps: [{ id: newId('s'), kind: 'manual', text: '' }] });

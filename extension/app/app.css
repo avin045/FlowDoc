@@ -334,6 +334,14 @@ dialog::backdrop { background: var(--backdrop); }
 .notion-help summary { cursor: pointer; color: var(--link); }
 .notion-help .howto { margin-top: 8px; }
 
+/* ---------- guides folder ---------- */
+.folder-box { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 6px 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.folder-path { flex: 1; min-width: 0; font: 13px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; word-break: break-all; }
+.folder-actions { flex-wrap: wrap; }
+.folder-confirm { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--line); }
+.folder-confirm .confirm-text { margin: 0; font-size: 14px; word-break: break-word; }
+.settings .folder-warning { margin: 0 0 10px; }
+
 /* ---------- theme toggle ---------- */
 .theme-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 3px; margin-bottom: 10px; border-radius: 10px; background: var(--soft); border: 1px solid var(--line); }
 .theme-toggle button { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 4px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 12px; font-weight: 500; }

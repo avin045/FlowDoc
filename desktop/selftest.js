@@ -4,11 +4,13 @@
 // the user's mouse), exercises AI enhancement against a mock server, runs the
 // exporters inside the workspace, and writes results.json for the runner.
 import { BrowserWindow, nativeTheme, screen } from 'electron';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import uiohookPkg from 'uiohook-napi';
-import { getGuide } from '../extension/shared/guides.js';
+import { getGuide, saveGuide } from '../extension/shared/guides.js';
 import { createSettings } from './settings.js';
+import { folderUsable } from './store.js';
 
 const { uIOhook, UiohookKey: K } = uiohookPkg;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -73,7 +75,23 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   }
   const KEYS = Object.fromEntries('abcdefghijklmnopqrstuvwxyz'.split('').map((c) => [c, K[c.toUpperCase()]]));
   Object.assign(KEYS, { ' ': K.Space, '@': K[2], '.': K.Period, '0': K[0], '1': K[1], '2': K[2], '3': K[3], '4': K[4], '5': K[5], '6': K[6], '7': K[7], '8': K[8], '9': K[9] });
+  // Typing steps ask Windows which field has keyboard focus, so the demo
+  // window must really be in front. Windows refuses plain focus() while the
+  // user is busy in another app; minimise + restore is allowed.
+  results.checks.demoFocused = true;
+  async function focusDemo() {
+    for (let attempt = 0; attempt < 3 && !demo.isFocused(); attempt++) {
+      demo.minimize();
+      await sleep(150);
+      demo.restore();
+      demo.focus();
+      demo.webContents.focus();
+      await sleep(300);
+    }
+    if (!demo.isFocused()) results.checks.demoFocused = false;
+  }
   async function type(text) {
+    await focusDemo();
     for (const ch of text) {
       const shift = ch === '@' || /[A-Z]/.test(ch);
       recorder.simulate.keydown({ keycode: KEYS[ch.toLowerCase()], shiftKey: shift, ctrlKey: false, altKey: false, metaKey: false });
@@ -369,6 +387,47 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     await first.update({ ai: { models: { gemini: 'gemini-3.8-flash' } } }); // user picks it again on purpose
     const keptChoice = (await createSettings(file).get()).ai.models.gemini;
     results.migration = { model, keptChoice };
+  }
+
+  // ---------- custom guides folder ----------
+  progress('guides folder');
+  {
+    const st = {};
+    const before = await js(`window.flowdocDesktop.storage.get()`);
+    st.before = { isDefault: before.isDefault, guides: before.guides };
+    const empty = mkdtempSync(join(tmpdir(), 'flowdoc-lib-'));
+    const busy = mkdtempSync(join(tmpdir(), 'flowdoc-busy-'));
+    writeFileSync(join(busy, 'my-notes.txt'), 'not a FlowDoc file');
+    st.inspectEmpty = await js(`window.flowdocDesktop.storage.inspect(${JSON.stringify(empty)})`);
+    st.inspectBusy = await js(`window.flowdocDesktop.storage.inspect(${JSON.stringify(busy)})`);
+    // Switch to the empty folder, copying the guides across.
+    const applied = await js(`window.flowdocDesktop.storage.apply({ target: ${JSON.stringify(empty)}, copy: true })`);
+    st.applied = { dir: applied.dir, copied: applied.copied, guides: applied.guides, isDefault: applied.isDefault };
+    st.filesInNew = existsSync(join(empty, `guide_${guideId}.json`)) && existsSync(join(empty, 'guides_index.json'));
+    // The library now reads and writes in the new folder.
+    const g = await getGuide(guideId);
+    g.description = 'Edited while stored in a custom folder';
+    await saveGuide(g);
+    st.writesGoToNew = JSON.parse(readFileSync(join(empty, `guide_${guideId}.json`), 'utf8')).description === g.description;
+    st.savedSetting = (await settings.get()).storage.libraryDir;
+    // The Settings dialog shows it.
+    await js(`location.hash = '#/'; window.flowdocApp.route()`);
+    await sleep(500);
+    await js(`document.querySelector('.settings-btn').click()`);
+    await waitFor(() => js(`document.querySelector('dialog .folder-path')?.textContent || null`));
+    st.ui = await js(`({ path: document.querySelector('dialog .folder-path').textContent, kind: document.querySelector('dialog .folder-kind').textContent, resetShown: !document.querySelector('dialog [data-act="resetFolder"]').hidden })`);
+    await js(`document.querySelector('dialog [data-act="resetFolder"]').click()`);
+    await sleep(400);
+    st.ui.confirm = await js(`document.querySelector('dialog .confirm-text')?.textContent || ''`);
+    await shot(mainWin, 'desktop-settings-folder.png');
+    await js(`document.querySelector('dialog [data-act="cancelFolder"]').click(); document.querySelector('dialog [data-close]').click();`);
+    await sleep(300);
+    // Back to the default folder; the edit made in the custom folder comes along.
+    const reset = await js(`window.flowdocDesktop.storage.reset({ copy: true })`);
+    st.reset = { isDefault: reset.isDefault, savedSetting: (await settings.get()).storage.libraryDir };
+    st.editCameBack = (await getGuide(guideId)).description === 'Edited while stored in a custom folder';
+    st.missingDriveUsable = await folderUsable('Q:\\\\definitely\\\\not\\\\here');
+    results.storage = st;
   }
 
   progress('exports');
