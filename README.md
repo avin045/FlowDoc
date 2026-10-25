@@ -228,8 +228,9 @@ The AI assistant turns recorded steps into polished instructions by looking at e
    - Newer isn't always faster. In October 2026, `gemini-3.8-flash` was so overloaded that a single screenshot took over 90 seconds, while `gemini-3.6-flash` handled four in about 4 seconds.
    - For Groq, choose a model that supports images (vision). Text-only models can still write titles, but they can't read the screenshots.
 5. Click **Test connection**. You should see **✓ Connected**.
-6. Optional: tick **Improve new guides automatically when a capture ends**.
-7. Click **Done**.
+6. Click **Done**.
+
+AI never runs on its own: a finished capture opens as recorded, and nothing is sent to the provider until you click **✨ Improve with AI**.
 
 **Step 3: Use it.**
 
@@ -489,7 +490,7 @@ The editor works the same in the desktop app and the extension. Every change sav
 2. Choose what to do:
    - **Redact** (selected by default): drag a box over names, emails, account numbers and so on. They become pixelated. Click a box again to remove it.
    - **Crop**: drag a box around the part of the screen to keep.
-   - **Click highlight**: untick it to remove the red outline and dot.
+   - **Click highlight**: untick it to remove the red outline around the clicked element and the ring that marks the click point.
    - **Undo**, **Remove crop** and **Clear redactions** fix mistakes.
 3. Click **Save changes**. Edits never touch the original capture, so you can change them later.
 

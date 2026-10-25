@@ -97,28 +97,27 @@ function drawHighlight(ctx, step, scale) {
   if (t && t.w > 0 && t.h > 0) {
     const pad = 4 * scale;
     ctx.save();
+    // Outline only: no tint over the element, so its label stays crisp.
     ctx.lineWidth = 3 * scale;
     ctx.strokeStyle = color;
-    ctx.fillStyle = 'rgba(244, 63, 94, 0.08)';
     roundRect(ctx, t.x * scale - pad, t.y * scale - pad, t.w * scale + pad * 2, t.h * scale + pad * 2, 6 * scale);
-    ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
   if (step.click) {
+    // A hollow ring: marks the spot without covering what was clicked. The
+    // white edge keeps it visible on dark windows as well as light pages.
     const cx = step.click.x * scale;
     const cy = step.click.y * scale;
+    const r = 15 * scale;
     ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, 16 * scale, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(244, 63, 94, 0.28)';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(cx, cy, 6 * scale, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.lineWidth = 2 * scale;
-    ctx.strokeStyle = '#fff';
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.lineWidth = 5 * scale;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.stroke();
+    ctx.lineWidth = 2.5 * scale;
+    ctx.strokeStyle = color;
     ctx.stroke();
     ctx.restore();
   }

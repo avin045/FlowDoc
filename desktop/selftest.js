@@ -103,6 +103,10 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
 
   // ---------- record ----------
   progress('recording');
+  // Regression: AI must never start on its own when a capture ends, even with
+  // AI set up and an old "improve automatically" value left in the settings.
+  await settings.update({ ai: { provider: 'gemini', models: { gemini: 'gemini-3.6-flash' }, autoEnhance: true } });
+  await settings.setKey('gemini', 'test-gemini-key');
   await startRecording({});
 
   // Recorder bar: buttons must sit outside the window-drag region (on Windows
@@ -163,6 +167,12 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   if (!results.widget.doneStopped) await recorder.stop();
   demo.destroy();
   await sleep(1500);
+  results.afterCapture = await mainWin.webContents.executeJavaScript(`({
+    guideOpen: location.hash === '#/guide/${guideId}',
+    aiDialog: !!document.querySelector('dialog .improve'),
+    aiBanner: !!document.querySelector('.ai-banner'),
+  })`);
+  results.afterCapture.autoSettingKept = 'autoEnhance' in (await settings.get()).ai;
 
   const guide = await getGuide(guideId);
   results.guide = {
