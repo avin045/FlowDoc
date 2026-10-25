@@ -3,6 +3,31 @@
 
 export const HIGHLIGHT_COLOR = '#f43f5e';
 
+// How clicks are marked on screenshots, chosen in Settings:
+//   normal: outline around the clicked element + ring at the click point
+//   box:    outline only
+//   none:   no marks
+// A display preference, so it lives in this browser profile like the theme.
+export const HIGHLIGHT_STYLES = ['normal', 'box', 'none'];
+const STYLE_KEY = 'flowdoc.highlightStyle';
+
+export function getHighlightStyle() {
+  try {
+    const v = localStorage.getItem(STYLE_KEY);
+    return HIGHLIGHT_STYLES.includes(v) ? v : 'normal';
+  } catch {
+    return 'normal';
+  }
+}
+
+export function setHighlightStyle(style) {
+  const v = HIGHLIGHT_STYLES.includes(style) ? style : 'normal';
+  try {
+    localStorage.setItem(STYLE_KEY, v);
+  } catch {}
+  window.dispatchEvent(new CustomEvent('flowdoc:highlight-style', { detail: v }));
+}
+
 // ---------- text ----------
 
 export function escapeHtml(text) {
@@ -91,7 +116,8 @@ function pixelate(ctx, source, x, y, w, h, block) {
   ctx.restore();
 }
 
-function drawHighlight(ctx, step, scale) {
+function drawHighlight(ctx, step, scale, style) {
+  if (style === 'none') return;
   const color = HIGHLIGHT_COLOR;
   const t = step.target;
   if (t && t.w > 0 && t.h > 0) {
@@ -104,7 +130,7 @@ function drawHighlight(ctx, step, scale) {
     ctx.stroke();
     ctx.restore();
   }
-  if (step.click) {
+  if (step.click && style === 'normal') {
     // A hollow ring: marks the spot without covering what was clicked. The
     // white edge keeps it visible on dark windows as well as light pages.
     const cx = step.click.x * scale;
@@ -125,7 +151,10 @@ function drawHighlight(ctx, step, scale) {
 
 // Composites a step's screenshot with its edits. Returns a canvas.
 // `crop: false` renders the full frame (used by the screenshot editor).
-export async function renderStepCanvas(step, { crop = true, maxWidth = 0 } = {}) {
+// `highlightStyle` overrides the Settings choice; `forceHighlight` draws the
+// marks even on steps where they're hidden (the AI needs them to see what
+// was clicked).
+export async function renderStepCanvas(step, { crop = true, maxWidth = 0, highlightStyle, forceHighlight = false } = {}) {
   const img = await loadImage(step.screenshot);
   const W = img.naturalWidth;
   const H = img.naturalHeight;
@@ -139,7 +168,9 @@ export async function renderStepCanvas(step, { crop = true, maxWidth = 0 } = {})
   for (const r of step.redactions || []) {
     pixelate(ctx, img, r.x * W, r.y * H, r.w * W, r.h * H, Math.max(8, 11 * scale));
   }
-  if (step.highlight !== false && step.kind === 'action') drawHighlight(ctx, step, scale);
+  if ((step.highlight !== false || forceHighlight) && step.kind === 'action') {
+    drawHighlight(ctx, step, scale, highlightStyle || getHighlightStyle());
+  }
 
   let out = base;
   const c = crop && step.crop;
@@ -163,7 +194,7 @@ export async function renderStepCanvas(step, { crop = true, maxWidth = 0 } = {})
 
 const renderCache = new Map();
 const editKey = (step, opts) =>
-  JSON.stringify([step.screenshot?.length, step.screenshot?.slice(-48), step.highlight, step.redactions, step.crop, step.target, step.click, opts]);
+  JSON.stringify([step.screenshot?.length, step.screenshot?.slice(-48), step.highlight, step.redactions, step.crop, step.target, step.click, getHighlightStyle(), opts]);
 
 // Data URL of the finished screenshot, cached by its edit state.
 export async function renderStepImage(step, { maxWidth = 1600, quality = 0.9 } = {}) {

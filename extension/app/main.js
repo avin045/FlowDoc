@@ -13,7 +13,7 @@ import { cancelJob, clearJob, estimateRemaining, getJob, isRunning, onJobChange 
 import { aiEnabled, openImproveDialog, openSettingsDialog } from './desktop.js';
 import { exportGuide, FORMATS, guideToPlainText, parseImport, printGuide } from './exporters/index.js';
 import { openImageEditor } from './imageEditor.js';
-import { download, escapeHtml, formatDate, htmlToRich, isNumbered, renderStepCanvas, renderStepImage, richToHtml } from './render.js';
+import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, renderStepCanvas, renderStepImage, richToHtml } from './render.js';
 import { openNotionDialog } from './notion.js';
 import { makeSampleGuide } from './sample.js';
 
@@ -289,7 +289,7 @@ async function backfillThumbs(guides) {
 
 async function updateThumb(guide) {
   const first = guide.steps.find((s) => isNumbered(s) && s.screenshot && !s.hideImage);
-  const key = first ? `${first.id}|${first.screenshot.length}|${JSON.stringify([first.redactions, first.crop, first.highlight])}` : '';
+  const key = first ? `${first.id}|${first.screenshot.length}|${JSON.stringify([first.redactions, first.crop, first.highlight, getHighlightStyle()])}` : '';
   if (key === (guide.thumbKey || '') && (guide.thumb || !first)) return false;
   guide.thumbKey = key;
   guide.thumb = first ? (await renderStepCanvas(first, { maxWidth: 480 })).toDataURL('image/jpeg', 0.75) : null;
@@ -562,6 +562,7 @@ async function renderEditor(id) {
       <button class="icon-btn" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">${I.undo}</button>
       <button class="icon-btn" data-act="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">${I.redo}</button>
       ${showAi ? `<button class="ghost ai-btn" data-act="ai" title="Rewrite steps and title with AI">${I.sparkle}<span class="label">Improve with AI</span></button>` : ''}
+      ${ro ? '' : `<button class="ghost" data-act="highlights" aria-pressed="true">${I.target}<span class="label">Highlights</span></button>`}
       <button class="ghost" data-act="copy" title="Copy the steps as plain text">${I.copy}<span class="label">Copy text</span></button>
       <button class="ghost" data-act="print">${I.print}<span class="label">Print</span></button>
       ${isDesktop && !ro ? `<button class="ghost" data-act="notion" title="Save this guide as a Notion page">${I.notion}<span class="label">Notion</span></button>` : ''}
@@ -634,6 +635,7 @@ async function renderEditor(id) {
   });
   $('[data-act="print"]', view).addEventListener('click', () => printGuide(current));
   $('[data-act="ai"]', view)?.addEventListener('click', () => runAiImprove());
+  $('[data-act="highlights"]', view)?.addEventListener('click', toggleAllHighlights);
   $('[data-act="copy"]', view).addEventListener('click', async () => {
     await navigator.clipboard.writeText(guideToPlainText(current));
     toast('Steps copied to clipboard');
@@ -808,7 +810,41 @@ function renderBlocks() {
   });
   $('.m-steps b', view).textContent = `${numbers.size} step${numbers.size === 1 ? '' : 's'}`;
   renderOutline(numbers);
+  updateHighlightsButton();
 }
+
+// ---------- "Highlights" toolbar toggle: show/hide marks on every step ----------
+
+const markedSteps = () => (current?.steps || []).filter((s) => s.kind === 'action' && s.screenshot && (s.target || s.click));
+
+function updateHighlightsButton() {
+  const btn = $('[data-act="highlights"]', view);
+  if (!btn) return;
+  const steps = markedSteps();
+  btn.hidden = !steps.length;
+  const style = getHighlightStyle();
+  const shown = steps.some((s) => s.highlight !== false);
+  btn.setAttribute('aria-pressed', String(shown && style !== 'none'));
+  btn.disabled = style === 'none';
+  btn.title =
+    style === 'none'
+      ? 'Click highlights are turned off for all guides (Settings → Click highlight)'
+      : shown
+        ? 'Hide the click highlight on every step of this guide'
+        : 'Show the click highlight on every step of this guide';
+  $('.label', btn).textContent = shown || style === 'none' ? 'Highlights' : 'Highlights off';
+}
+
+function toggleAllHighlights() {
+  const steps = markedSteps();
+  if (!steps.length) return;
+  const show = !steps.some((s) => s.highlight !== false); // all hidden -> show all
+  mutate(() => steps.forEach((s) => (s.highlight = show)));
+  toast(show ? 'Click highlights shown on every step' : 'Click highlights hidden on every step. Ctrl+Z to undo.');
+}
+
+// The Settings choice changed: redraw what's on screen.
+window.addEventListener('flowdoc:highlight-style', () => current && renderBlocks());
 
 function renderOutline(numbers) {
   const ol = $('.outline ol', view);

@@ -500,6 +500,17 @@ Other screenshot actions:
 - **Use your own image:** **⋯ → Replace screenshot**.
 - **All steps at once:** **⋯** in the top bar → **Hide all screenshots** or **Show all screenshots**.
 
+Click highlights (the marks showing what was clicked):
+
+- **One step:** the target icon in the step's toolbar, or **Click highlight** in the screenshot editor.
+- **Every step of this guide:** click **Highlights** in the top toolbar. It reads **Highlights off** while they're hidden; click again to show them all. **Ctrl+Z** undoes it.
+- **How marks look in all guides (desktop app):** **Settings → Click highlight**:
+  - **Normal** (default): an outline around the clicked element plus a ring at the exact click point. The ring's centre is see-through, so the text or button under it stays readable.
+  - **Box only:** just the outline.
+  - **None:** no marks at all. The **Highlights** toggle is then greyed out.
+
+  The style applies to the editor and every export (PDF, Word, HTML, Markdown, Notion). Screenshots sent to **Improve with AI** always keep the full marks, because the AI uses them to see what was clicked.
+
 ### C5. Export
 
 1. Click **Export** at the top-right.
