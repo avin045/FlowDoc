@@ -106,6 +106,9 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   let lastClick = null; // { stepId, at, x, y }
   let hookRunning = false;
   let captureSettings = {};
+  // "Continue capturing": the ids of the steps the guide already had. They are
+  // never rewritten, and Discard removes only the steps added after them.
+  let keepIds = null;
 
   const win = process.platform === 'win32';
   const toDip = (p) => (win ? screen.screenToDipPoint(p) : p);
@@ -239,7 +242,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       // Continuing to type in the same field refines the previous step.
       const guide = await getGuide(state.guideId);
       const last = guide?.steps.at(-1);
-      const sameField = last?.action === 'type' && last.fieldKey && last.fieldKey === fieldKey(field);
+      const sameField = last?.action === 'type' && last.fieldKey && last.fieldKey === fieldKey(field) && !keepIds?.has(last.id);
       step.fieldKey = fieldKey(field);
       await appendSteps([step], sameField ? { replaceId: last.id } : {});
     });
@@ -345,13 +348,23 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
 
   // ---------- session control ----------
 
-  async function start({ title = '' } = {}) {
+  // `guideId` continues an existing guide: new steps go after its last one.
+  async function start({ title = '', guideId } = {}) {
     if (state.active) return { ...state };
     captureSettings = (await settings.get()).capture;
-    const guide = createGuide({ title, recording: true, source: { app: 'Desktop', platform: process.platform } });
+    let guide = guideId ? await getGuide(guideId) : null;
+    if (guideId && !guide) throw new Error('That guide no longer exists.');
+    if (guide) {
+      keepIds = new Set(guide.steps.map((s) => s.id));
+      guide.recording = true;
+    } else {
+      keepIds = null;
+      guide = createGuide({ title, recording: true, source: { app: 'Desktop', platform: process.platform } });
+    }
     await saveGuide(guide);
     await Promise.all([capture.start(), inspector.warmUp()]);
-    state = { active: true, paused: false, guideId: guide.id, stepCount: 0, startedAt: Date.now() };
+    const stepCount = guide.steps.filter((s) => s.kind === 'action').length;
+    state = { active: true, paused: false, guideId: guide.id, stepCount, startedAt: Date.now(), continuing: !!keepIds };
     if (!hookRunning && !process.env.FLOWDOC_NO_HOOK) {
       uIOhook.start();
       hookRunning = true;
@@ -378,6 +391,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       if (!guide.title) guide.title = desktopTitle(guide);
       await saveGuide(guide);
     }
+    keepIds = null;
     state = { active: false, paused: false, guideId: null, stepCount: 0, startedAt: 0 };
     emitState();
     events.emit('finished', { guideId });
@@ -395,7 +409,18 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       hookRunning = false;
     }
     capture.stop();
-    await deleteGuide(guideId);
+    if (keepIds) {
+      // Continuing an existing guide: drop only this session's steps.
+      const guide = await getGuide(guideId);
+      if (guide) {
+        guide.steps = guide.steps.filter((s) => keepIds.has(s.id));
+        delete guide.recording;
+        await saveGuide(guide);
+      }
+    } else {
+      await deleteGuide(guideId);
+    }
+    keepIds = null;
     state = { active: false, paused: false, guideId: null, stepCount: 0, startedAt: 0 };
     emitState();
     return { ...state };

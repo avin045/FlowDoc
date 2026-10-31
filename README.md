@@ -555,6 +555,18 @@ The choice applies everywhere: the workspace, the extension popup, and the deskt
 - **Import:** loads a `.flowdoc.json` backup.
 - **Blank guide:** starts a guide without recording, for manual instructions.
 
+### C9. Add more steps later (Continue capturing)
+
+Open a guide and click **● Continue capturing** in the toolbar to record more steps into it, for example the next part of a process you documented yesterday.
+
+- **Desktop:** capture starts straight away, the same as **New capture**.
+- **Extension:** pick the tab to carry on in. A **Navigate to** step is added only when that page differs from where the guide left off.
+- New steps go **after the last step**. Your title, description, edits and earlier steps stay as they are, and step numbers carry on (step 13, 14, …).
+- The guide is locked while capturing and unlocks when you click **Done**.
+- **Discard** removes only the steps from this session. The guide itself is kept.
+- If **Improve with AI** is still running on the guide, wait for it to finish or stop it first.
+- Undo history is cleared when the capture ends, so **Undo** can't remove the new steps by accident.
+
 ---
 
 ## Web workspace (no install)

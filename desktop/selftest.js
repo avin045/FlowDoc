@@ -40,17 +40,21 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
 
   // ---------- demo window ----------
   const area = screen.getPrimaryDisplay().workArea;
-  const demo = new BrowserWindow({
-    width: Math.min(1100, area.width - 40),
-    height: Math.min(760, area.height - 40),
-    x: area.x + 20,
-    y: area.y + 20,
-    title: 'Northwind Support (FlowDoc self-test)',
-    autoHideMenuBar: true,
-    alwaysOnTop: true,
-  });
-  markCapturable(demo);
-  await demo.loadURL('app://flowdoc/demo/index.html');
+  const openDemo = async (page) => {
+    const w = new BrowserWindow({
+      width: Math.min(1100, area.width - 40),
+      height: Math.min(760, area.height - 40),
+      x: area.x + 20,
+      y: area.y + 20,
+      title: 'Northwind Support (FlowDoc self-test)',
+      autoHideMenuBar: true,
+      alwaysOnTop: true,
+    });
+    markCapturable(w);
+    await w.loadURL(`app://flowdoc/demo/${page}`);
+    return w;
+  };
+  let demo = await openDemo('index.html');
   demo.focus();
   await sleep(1200);
 
@@ -199,6 +203,56 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     })),
   };
   results.rawContainsPassword = JSON.stringify(guide).includes('hunter22');
+
+  // ---------- continue capturing ----------
+  // The editor's "Continue capturing" adds new steps after the last one and
+  // keeps the guide's title and steps; Discard removes only the new steps.
+  progress('continue capturing');
+  const mainJs = (code) => mainWin.webContents.executeJavaScript(code);
+  const snapshot = (g) => g.steps.map((s) => `${s.id}|${s.text}`);
+  await mainJs(`location.hash = '#/guide/${guideId}'; window.flowdocApp.route()`);
+  await sleep(700);
+  demo = await openDemo('ticket.html');
+  demo.focus();
+  await sleep(800);
+  const before = await getGuide(guideId);
+  results.continue = { button: await mainJs(`!!document.querySelector('[data-act="continue"]')`) };
+  await mainJs(`document.querySelector('[data-act="continue"]').click()`);
+  for (let i = 0; i < 50 && !recorder.state.active; i++) await sleep(100);
+  await sleep(500);
+  results.continue.started = { sameGuide: recorder.state.guideId === guideId, stepCount: recorder.state.stepCount, continuing: recorder.state.continuing };
+  results.continue.locked = await mainJs(`!!document.querySelector('.recording-banner') && !document.querySelector('[data-act="continue"]')`);
+  await click('#subject');
+  await click('h1');
+  await recorder.drain();
+  const continued = new Promise((r) => recorder.events.once('finished', r));
+  await recorder.stop();
+  await continued;
+  await sleep(800);
+  const afterContinue = await getGuide(guideId);
+  results.continue.after = {
+    beforeActions: before.steps.filter((s) => s.kind === 'action').length,
+    added: afterContinue.steps.length - before.steps.length,
+    keptOld: JSON.stringify(snapshot(afterContinue).slice(0, before.steps.length)) === JSON.stringify(snapshot(before)),
+    titleKept: afterContinue.title === before.title,
+    notRecording: !afterContinue.recording,
+    newTexts: afterContinue.steps.slice(before.steps.length).map((s) => s.text),
+    newShots: afterContinue.steps.slice(before.steps.length).filter((s) => s.screenshot).length,
+    editorUnlocked: await mainJs(`location.hash === '#/guide/${guideId}' && !document.querySelector('.recording-banner') && !!document.querySelector('[data-act="continue"]')`),
+  };
+  await shot(mainWin, 'desktop-continued.png');
+  // Continue again, then throw the new steps away.
+  await recorder.start({ guideId });
+  await click('h1');
+  await recorder.drain();
+  await recorder.discard();
+  const afterDiscard = await getGuide(guideId);
+  results.continue.discard = {
+    exists: !!afterDiscard,
+    sameSteps: !!afterDiscard && JSON.stringify(snapshot(afterDiscard)) === JSON.stringify(snapshot(afterContinue)),
+    notRecording: !!afterDiscard && !afterDiscard.recording,
+  };
+  demo.destroy();
   await shot(mainWin, 'desktop-editor.png');
 
   // ---------- AI enhancement against the mock providers ----------

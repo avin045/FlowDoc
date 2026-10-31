@@ -349,12 +349,19 @@ async function removeGuide(id, title) {
 
 // ---------- capture launcher ----------
 
-async function startCaptureDialog() {
+// With `guideId`, the capture continues that guide: new steps are added after
+// its last one, and its title and edits are kept.
+async function startCaptureDialog({ guideId } = {}) {
   if (isDesktop) {
     const state = await desktop.recorder.state();
-    if (state.active) return desktop.recorder.stop();
+    if (state.active) return guideId ? toast('A capture is already running') : desktop.recorder.stop();
     await flushSave();
-    await desktop.recorder.start();
+    try {
+      await desktop.recorder.start(guideId ? { guideId } : undefined);
+    } catch (err) {
+      return toast(`Couldn't start capturing: ${err.message}`);
+    }
+    if (guideId) await route(); // show the guide locked, with steps arriving live
     return;
   }
   if (!isExtension) {
@@ -375,10 +382,13 @@ async function startCaptureDialog() {
     dlg.showModal();
     return;
   }
+  if (guideId && (await chrome.runtime.sendMessage({ type: 'getState' }))?.active) return toast('A capture is already running');
+  if (guideId) await flushSave();
+  const begin = (tabId) => chrome.runtime.sendMessage({ type: 'start', tabId, guideId });
   const tabs = (await chrome.tabs.query({})).filter((t) => /^(https?|file):/.test(t.url || ''));
   const dlg = h(`<dialog><div class="dlg">
-    <h2>Start a capture</h2>
-    <p class="sub">Pick the tab where the process starts, or open a new address. Capture begins straight away.</p>
+    <h2>${guideId ? 'Continue capturing' : 'Start a capture'}</h2>
+    <p class="sub">${guideId ? 'Pick the tab where you want to carry on. New steps are added after the last step of this guide.' : 'Pick the tab where the process starts, or open a new address. Capture begins straight away.'}</p>
     <form class="url-form" style="display:flex;gap:8px;margin-bottom:14px">
       <input type="url" required placeholder="https://example.com" style="flex:1;border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;background:var(--panel)">
       <button class="primary">Open &amp; capture</button>
@@ -397,7 +407,8 @@ async function startCaptureDialog() {
       dlg.close();
       await chrome.tabs.update(t.id, { active: true });
       await chrome.windows.update(t.windowId, { focused: true });
-      await chrome.runtime.sendMessage({ type: 'start', tabId: t.id });
+      await begin(t.id);
+      if (guideId) route();
     });
     list.append(b);
   }
@@ -409,7 +420,8 @@ async function startCaptureDialog() {
     const onUpdated = async (id, info) => {
       if (id !== tab.id || info.status !== 'complete') return;
       chrome.tabs.onUpdated.removeListener(onUpdated);
-      await chrome.runtime.sendMessage({ type: 'start', tabId: tab.id });
+      await begin(tab.id);
+      if (guideId) route();
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
   });
@@ -538,7 +550,9 @@ async function renderEditor(id) {
     renderSidebar(null);
     return;
   }
-  if (current?.id !== id) {
+  // A new guide, or one whose capture just ended (older snapshots would drop
+  // the steps that "Continue capturing" added).
+  if (current?.id !== id || (current.recording && !guide.recording)) {
     undoStack = [];
     redoStack = [];
   }
@@ -562,6 +576,7 @@ async function renderEditor(id) {
       <button class="icon-btn" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">${I.undo}</button>
       <button class="icon-btn" data-act="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">${I.redo}</button>
       ${showAi ? `<button class="ghost ai-btn" data-act="ai" title="Rewrite steps and title with AI">${I.sparkle}<span class="label">Improve with AI</span></button>` : ''}
+      ${ro || !(isDesktop || isExtension) ? '' : `<button class="ghost" data-act="continue" title="Record more steps and add them after the last step">${'<span class="rec"></span>'}<span class="label">Continue capturing</span></button>`}
       ${ro ? '' : `<button class="ghost" data-act="highlights" aria-pressed="true">${I.target}<span class="label">Highlights</span></button>`}
       <button class="ghost" data-act="copy" title="Copy the steps as plain text">${I.copy}<span class="label">Copy text</span></button>
       <button class="ghost" data-act="print">${I.print}<span class="label">Print</span></button>
@@ -636,6 +651,11 @@ async function renderEditor(id) {
   $('[data-act="print"]', view).addEventListener('click', () => printGuide(current));
   $('[data-act="ai"]', view)?.addEventListener('click', () => runAiImprove());
   $('[data-act="highlights"]', view)?.addEventListener('click', toggleAllHighlights);
+  $('[data-act="continue"]', view)?.addEventListener('click', () => {
+    // An AI rewrite in progress would overwrite the new steps when it lands.
+    if (isDesktop && isRunning(current.id)) return toast('Wait for the AI rewrite to finish, or stop it first');
+    startCaptureDialog({ guideId: current.id });
+  });
   $('[data-act="copy"]', view).addEventListener('click', async () => {
     await navigator.clipboard.writeText(guideToPlainText(current));
     toast('Steps copied to clipboard');
