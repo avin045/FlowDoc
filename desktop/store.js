@@ -47,7 +47,7 @@ export function createFileStore(initialDir, { onChange } = {}) {
         const file = fileFor(key);
         const tmp = `${file}.${process.pid}.tmp`;
         await writeFile(tmp, JSON.stringify(value));
-        await rename(tmp, file);
+        await renameRetry(tmp, file);
         onChange?.(key, source);
       });
     },
@@ -59,6 +59,19 @@ export function createFileStore(initialDir, { onChange } = {}) {
       });
     },
   };
+}
+
+// On Windows a rename fails for a moment while another program (antivirus,
+// the search indexer) has the target open. Try again briefly before giving up.
+async function renameRetry(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (err) {
+      if (attempt >= 8 || !['EPERM', 'EACCES', 'EBUSY'].includes(err.code)) throw err;
+      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+    }
+  }
 }
 
 // ---------- guides folder helpers ----------

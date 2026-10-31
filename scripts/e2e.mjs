@@ -217,6 +217,44 @@ try {
   const json = JSON.parse(readFileSync(files.json, 'utf8'));
   check(json.format === 'flowdoc-guide' && json.guide.steps.length === edited.steps.length, 'JSON backup round-trips');
 
+  // ---------- continue capturing ----------
+  console.log('\nContinue capturing');
+  const snap = (g) => g.steps.map((s) => `${s.id}|${s.text}`);
+  const beforeContinue = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+  await app.click('[data-act="continue"]');
+  await app.waitForSelector('dialog .tab-list button');
+  check((await app.locator('dialog h2').textContent()) === 'Continue capturing', 'the button asks which tab to carry on in');
+  await app.click('dialog .tab-list button');
+  await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+  await app.waitForSelector('.recording-banner');
+  const contState = await send({ type: 'getState' });
+  check(contState.active && contState.guideId === guideId && contState.stepCount === beforeContinue.steps.filter((s) => s.kind === 'action').length, 'capture continues the same guide and counts on', `${contState.stepCount} steps`);
+  await page.click('#subject');
+  await page.waitForTimeout(400);
+  await page.click('#submit');
+  await page.waitForTimeout(1500);
+  const reopened = context.waitForEvent('page');
+  await send({ type: 'stop' });
+  await (await reopened).close();
+  const continued = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+  const added = continued.steps.slice(beforeContinue.steps.length);
+  check(
+    added.length >= 2 && JSON.stringify(snap(continued).slice(0, beforeContinue.steps.length)) === JSON.stringify(snap(beforeContinue)) && continued.title === beforeContinue.title,
+    'new steps go after the old ones; old steps and title kept',
+    added.map((s) => s.text).join(' / '),
+  );
+  check(!added.some((s) => s.action === 'navigate'), 'no extra "Navigate to" step when the page is unchanged');
+  await app.waitForSelector('[data-act="continue"]');
+  check(!(await app.$('.recording-banner')), 'the open editor unlocks when the capture ends');
+  await send({ type: 'start', tabId, guideId });
+  await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+  await page.click('#subject');
+  await page.waitForTimeout(800);
+  await send({ type: 'discard' });
+  await page.waitForTimeout(500);
+  const discarded = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+  check(discarded && !discarded.recording && JSON.stringify(snap(discarded)) === JSON.stringify(snap(continued)), 'Discard removes only the new steps and keeps the guide');
+
   // ---------- library ----------
   await app.goto(`chrome-extension://${extId}/app.html#/`);
   await app.waitForSelector('.card');

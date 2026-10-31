@@ -258,6 +258,18 @@ const ac = r.afterCapture || {};
 check(ac.guideOpen && !ac.aiDialog && !ac.aiBanner, 'a finished capture opens the guide without starting AI', JSON.stringify(ac));
 check(ac.autoSettingKept === false, 'the old "improve automatically" setting is ignored and dropped');
 
+console.log('\nContinue capturing');
+const cc = r.continue || {};
+const ca = cc.after || {};
+check(cc.button && cc.started?.sameGuide && cc.started.continuing, 'the editor button continues the same guide', JSON.stringify(cc.started));
+check(cc.started?.stepCount === ca.beforeActions, 'the recorder counts on from the existing steps', `${cc.started?.stepCount} of ${ca.beforeActions}`);
+check(cc.locked, 'the guide is locked while capturing');
+check(ca.added >= 2 && ca.keptOld && ca.titleKept, 'new steps are added after the old ones; old steps and title kept', `+${ca.added}: ${(ca.newTexts || []).join(' / ')}`);
+check(ca.notRecording && ca.editorUnlocked, 'Done reopens the guide unlocked');
+check(cc.discard?.exists && cc.discard.sameSteps && cc.discard.notRecording, 'Discard removes only the new steps and keeps the guide', JSON.stringify(cc.discard));
+// Later checks work on the guide as it is after "Continue capturing".
+const finalSteps = r.guide.steps.length + (ca.added || 0);
+
 console.log('\nAI client');
 check(direct.thinkingRejected.ok && direct.thinkingRejected.model === 'gemini-legacy', 'models that reject thinking settings are retried with defaults');
 check(direct.busy.ok && direct.busy.model === 'gemini-3.6-flash', 'an overloaded model (503) hands over to gemini-3.6-flash', `${direct.busy.model || direct.busy.error} in ${direct.busy.ms} ms`);
@@ -272,7 +284,7 @@ const crispCalls = stepCalls.filter((c) => c.images === 0);
 const imageCalls = stepCalls.filter((c) => c.images > 0);
 check(gem.length > 0 && gem.every((c) => c.key === 'test-gemini-key' && c.model === 'gemini-3.6-flash'), 'Gemini requests use saved key and model', `${gem.length} calls`);
 check(gem.every((c) => c.json === 'application/json' && c.thinking?.thinkingLevel === 'MINIMAL'), 'Gemini requests use JSON mode and minimal thinking');
-check(crispCalls.length === 1 && crispCalls[0].batch === r.guide.steps.length, 'Crisp sends text only, all steps in one request', `${crispCalls.map((c) => `${c.batch} steps/0 images`).join(', ')}`);
+check(crispCalls.length === 1 && crispCalls[0].batch === finalSteps, 'Crisp sends text only, all steps in one request', `${crispCalls.map((c) => `${c.batch} steps/0 images`).join(', ')}`);
 check(imageCalls.length >= 4 && imageCalls.every((c) => c.batch <= 5 && c.images >= 1), 'Elaborate and Conceptual send screenshots, 5 steps per request', `${imageCalls.length} requests`);
 check(gem.filter((c) => c.understand).length === 1 && gem.find((c) => c.understand).images === 0, 'Conceptual first reads the whole guide (text only)');
 check(r.ai.gemini.title === 'How to sign in and open a support ticket (gemini, elaborate)' && r.ai.gemini.notes >= 3, 'Elaborate: title applied and useful notes added', `${r.ai.gemini.notes} notes`);
@@ -316,7 +328,7 @@ check(/up to 10/.test(n.eleventh || ''), 'an 11th saved location is refused', n.
 check(n.whenFull?.count === '10/10' && n.whenFull.starDisabled && /Remove one/.test(n.whenFull.message), 'with 10 saved, the UI asks to remove one first', JSON.stringify(n.whenFull));
 check(n.afterRemove?.count === '9/10' && !n.afterRemove.starDisabled, 'removing one frees a slot');
 check(notion.calls.every((c) => c.version === '2026-03-11' && c.auth === 'Bearer ntn_test_secret'), 'every Notion call sends the version header and the saved secret', `${notion.calls.length} calls`);
-const imagesInGuide = r.guide.steps.filter((s) => s.hasShot).length;
+const imagesInGuide = r.guide.steps.filter((s) => s.hasShot).length + (ca.newShots || 0);
 check(notion.uploads === imagesInGuide && notion.sent.length === imagesInGuide && notion.sent.every((x) => x.multipart && x.bytes > 5000), 'each screenshot uploaded as a file (multipart)', `${notion.sent.length}/${imagesInGuide}`);
 const page = notion.pages[0] || {};
 const allBlocks = [...(page.children || [])];

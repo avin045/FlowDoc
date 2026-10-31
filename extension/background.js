@@ -130,21 +130,30 @@ async function addSteps(rawSteps, { windowId, page, capture: wantCapture = true 
 
 // ---------- session control ----------
 
-async function start(tabId) {
+// `guideId` continues an existing guide ("Continue capturing"): new steps go
+// after its last one, and Discard removes only those.
+async function start(tabId, { guideId } = {}) {
   const state = await getState();
   if (state.active) return state;
+  const existing = guideId ? await getGuide(guideId) : null;
+  if (guideId && !existing) throw new Error('That guide no longer exists.');
   let tab = await chrome.tabs.get(tabId);
   // captureVisibleTab only sees the active tab, so bring the target forward.
   if (!tab.active) {
     tab = await chrome.tabs.update(tabId, { active: true });
     await new Promise((r) => setTimeout(r, 400)); // let it paint before the first capture
   }
-  const guide = createGuide({ recording: true, source: { url: tab.url, title: tab.title } });
+  const guide = existing || createGuide({ source: { url: tab.url, title: tab.title } });
+  guide.recording = true;
   await saveGuide(guide);
-  await chrome.storage.local.set({ [STATE_KEY]: { active: true, paused: false, guideId: guide.id, stepCount: 0 } });
+  const keepIds = existing ? existing.steps.map((s) => s.id) : null;
+  const stepCount = guide.steps.filter((s) => s.kind === 'action').length;
+  await chrome.storage.local.set({ [STATE_KEY]: { active: true, paused: false, guideId: guide.id, stepCount, keepIds } });
 
-  // The opening "Navigate to" step is captured before the recorder widget appears.
-  if (/^(https?|file):/.test(tab.url || '')) {
+  // The opening "Navigate to" step is captured before the recorder widget
+  // appears. A continued guide only gets one when the page has changed.
+  const lastUrl = existing?.steps.findLast((s) => s.url)?.url;
+  if (/^(https?|file):/.test(tab.url || '') && (!existing || lastUrl !== tab.url)) {
     let host = tab.url;
     try {
       host = new URL(tab.url).hostname || tab.url;
@@ -176,7 +185,16 @@ async function stop({ open = true } = {}) {
 async function discard() {
   const state = await getState();
   if (!state.active) return state;
-  await enqueue(() => deleteGuide(state.guideId));
+  await enqueue(async () => {
+    if (!state.keepIds) return deleteGuide(state.guideId);
+    // A continued guide keeps the steps it had before this capture.
+    const guide = await getGuide(state.guideId);
+    if (!guide) return;
+    const keep = new Set(state.keepIds);
+    guide.steps = guide.steps.filter((s) => keep.has(s.id));
+    delete guide.recording;
+    await saveGuide(guide);
+  });
   return setState(IDLE);
 }
 
@@ -197,7 +215,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'getState':
         return getState();
       case 'start':
-        return start(msg.tabId);
+        return start(msg.tabId, { guideId: msg.guideId });
       case 'stop':
         return stop();
       case 'discard':
