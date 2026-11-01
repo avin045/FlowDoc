@@ -236,6 +236,9 @@ export async function buildExportModel(guide, { images = true, maxWidth = 1600 }
     stepCount: n,
     createdAt: guide.createdAt,
     author: guide.author || '',
+    // Set on translated copies: { code, native, english, rtl? }
+    language: guide.language || null,
+    rtl: !!guide.language?.rtl,
     blocks,
   };
 }

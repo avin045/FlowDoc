@@ -1,9 +1,9 @@
 // Choosing the area to capture, and marking it while capturing.
 // The picker covers every display with a dimmed overlay (area.html): drag a
 // rectangle, or click a window to take its frame, then press Enter or Start.
-// While capturing, a thin border sits just outside the area: one window around
-// it, cut down to the border (setShape), so the area itself isn't covered at
-// all and the border stays out of its screenshots.
+// While capturing, a thin border sits just outside the area (four thin
+// windows), so the area itself isn't covered at all and the border stays out
+// of its screenshots.
 import { BrowserWindow, ipcMain, screen } from 'electron';
 import { join } from 'node:path';
 
@@ -94,67 +94,93 @@ export function createAreaPicker({ dir, listWindows = async () => [], log = () =
 const EDGE = 3;
 const COLOR = '#6366f1';
 const PAUSED = '#94a3b8';
+// Windows won't make a window thinner than ~30-40 px, so each side is a
+// transparent window this thick that reaches away from the area, with only
+// the EDGE pixels next to the area painted.
+const THICK = 48;
 
+// Four windows, one per side, all outside the area. (One window cut to a
+// frame with setShape isn't reliable: on Windows the shape can be lost and the
+// whole window then covers the area as a blank rectangle.)
 export function createAreaFrame() {
-  let win = null;
+  let strips = [];
   let shown = '';
+  let hidden = true; // kept out of screen captures (follows the recorder bar setting)
 
   function make() {
-    win = new BrowserWindow({
+    const w = new BrowserWindow({
       frame: false,
+      transparent: true,
       resizable: false,
       movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
       focusable: false,
       skipTaskbar: true,
       hasShadow: false,
       enableLargerThanScreen: true,
       show: false,
-      backgroundColor: COLOR,
-      webPreferences: { sandbox: true, contextIsolation: true },
+      webPreferences: { sandbox: true, contextIsolation: true, javascript: false },
     });
-    win.setAlwaysOnTop(true, 'screen-saver');
-    win.setIgnoreMouseEvents(true);
-    win.setContentProtection(true);
+    w.setAlwaysOnTop(true, 'screen-saver');
+    w.setIgnoreMouseEvents(true);
+    w.setContentProtection(hidden);
+    return w;
   }
+
+  // Each side: the window (DIP screen coordinates) and the painted line inside
+  // it. With display scaling Windows can round a window's size up by a pixel,
+  // so the top and left sides stop one pixel short of the area.
+  const T = THICK - 1;
+  const sides = ({ x, y, width: w, height: h }) => [
+    { win: { x: x - EDGE, y: y - THICK, width: w + 2 * EDGE, height: T }, line: { left: 0, top: T - EDGE, width: w + 2 * EDGE, height: EDGE } },
+    { win: { x: x - EDGE, y: y + h, width: w + 2 * EDGE, height: THICK }, line: { left: 0, top: 0, width: w + 2 * EDGE, height: EDGE } },
+    { win: { x: x - THICK, y, width: T, height: Math.max(h, THICK) }, line: { left: T - EDGE, top: 0, width: EDGE, height: h } },
+    { win: { x: x + w, y, width: THICK, height: Math.max(h, THICK) }, line: { left: 0, top: 0, width: EDGE, height: h } },
+  ];
+  const page = (line, color) => {
+    const css = Object.entries(line).map(([k, v]) => `${k}:${Math.round(v)}px`).join(';');
+    return `data:text/html,${encodeURIComponent(`<!doctype html><style>html,body{margin:0;background:transparent;overflow:hidden}i{position:fixed;background:${color};${css}}</style><i></i>`)}`;
+  };
 
   function show(area, { paused = false } = {}) {
     if (!area) return hide();
     const key = JSON.stringify([area.x, area.y, area.width, area.height, paused]);
     if (key === shown) return;
     shown = key;
-    if (!win || win.isDestroyed()) make();
-    const { x, y, width: w, height: h } = area;
-    const W = w + 2 * EDGE;
-    const H = h + 2 * EDGE;
-    const bounds = { x: x - EDGE, y: y - EDGE, width: W, height: H };
-    win.setBackgroundColor(paused ? PAUSED : COLOR);
-    win.setBounds(bounds);
-    win.setShape([
-      { x: 0, y: 0, width: W, height: EDGE },
-      { x: 0, y: H - EDGE, width: W, height: EDGE },
-      { x: 0, y: EDGE, width: EDGE, height: h },
-      { x: W - EDGE, y: EDGE, width: EDGE, height: h },
-    ]);
-    win.showInactive();
-    win.setBounds(bounds);
+    if (strips.length !== 4 || strips.some((w) => w.isDestroyed())) {
+      for (const w of strips) if (!w.isDestroyed()) w.destroy();
+      strips = [make(), make(), make(), make()];
+    }
+    sides(area).forEach(({ win, line }, i) => {
+      const w = strips[i];
+      const bounds = { x: Math.round(win.x), y: Math.round(win.y), width: Math.round(win.width), height: Math.round(win.height) };
+      w.loadURL(page(line, paused ? PAUSED : COLOR));
+      w.setBounds(bounds);
+      w.showInactive();
+      w.setBounds(bounds); // Windows can resize a window by its display's scale when it first shows
+    });
   }
 
   function hide() {
     shown = '';
-    if (win && !win.isDestroyed()) win.hide();
+    for (const w of strips) if (!w.isDestroyed()) w.hide();
   }
 
-  // The border's pieces in DIP screen coordinates (for the self-test).
-  function pieces() {
-    if (!win || win.isDestroyed() || !shown) return [];
-    const b = win.getBounds();
-    return [
-      { x: b.x, y: b.y, width: b.width, height: EDGE },
-      { x: b.x, y: b.y + b.height - EDGE, width: b.width, height: EDGE },
-      { x: b.x, y: b.y + EDGE, width: EDGE, height: b.height - 2 * EDGE },
-      { x: b.x + b.width - EDGE, y: b.y + EDGE, width: EDGE, height: b.height - 2 * EDGE },
-    ];
-  }
-
-  return { show, hide, pieces, get visible() { return !!win && !win.isDestroyed() && win.isVisible(); }, get bounds() { return win?.getBounds(); } };
+  const live = () => strips.filter((w) => !w.isDestroyed());
+  return {
+    show,
+    hide,
+    setProtected(on) {
+      hidden = !!on;
+      for (const w of live()) w.setContentProtection(hidden);
+    },
+    // The real window bounds (DIP), for the self-test.
+    pieces: () => (shown ? live().map((w) => w.getBounds()) : []),
+    windows: live,
+    get visible() {
+      return live().some((w) => w.isVisible());
+    },
+  };
 }

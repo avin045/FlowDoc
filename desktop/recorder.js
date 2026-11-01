@@ -214,8 +214,9 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       const big = d.width * d.height > db.width * db.height * 0.4;
       if (!big) step.target = { x: d.x - db.x, y: d.y - db.y, w: d.width, h: d.height };
     }
-    // The recorder bar can only be hidden from captures on Windows; elsewhere blur it.
-    const wb = !win && widgetBounds?.();
+    // When the recorder bar can show up in captures (Linux, or the user made it
+    // visible to other apps), blur it out of the shot.
+    const wb = widgetBounds?.();
     if (wb && frame && wb.x < db.x + db.width && wb.x + wb.width > db.x && wb.y < db.y + db.height && wb.y + wb.height > db.y) {
       step.redactions.push({ x: (wb.x - db.x) / db.width, y: (wb.y - db.y) / db.height, w: wb.width / db.width, h: wb.height / db.height });
     }

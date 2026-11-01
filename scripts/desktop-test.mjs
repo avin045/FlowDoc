@@ -28,6 +28,16 @@ function answer(prompt) {
       ],
     };
   }
+  if (prompt.startsWith('Translate these')) {
+    // Translation: one entry per "[i] (kind) text" line. The mock "translates"
+    // by adding a Tamil prefix, so bold names and typed values survive...
+    const items = [...prompt.matchAll(/^\[(\d+)\] \((.*?)\) (.*)$/gm)].map(([, i, , text]) => {
+      // ...except here, where it carelessly translates a typed value too.
+      const t = text.replace('"Printer offline"', '"அச்சுப்பொறி இணைப்பில் இல்லை"');
+      return { i: Number(i), text: `தமிழ்: ${t}` };
+    });
+    return { items };
+  }
   if (prompt.includes('Draft: ')) {
     // Batched step rewrite: one entry per "[i] (...) Draft: ..." line.
     const steps = [...prompt.matchAll(/^\[(\d+)\] \(.*?\) Draft: (.*)$/gm)].map(([, i, draft]) => {
@@ -135,7 +145,7 @@ const server = createServer((req, res) => {
       const prompt = parts.find((p) => p.text).text;
       const model = decodeURIComponent(url.split('/models/')[1].split(':')[0]);
       const thinking = json.generationConfig?.thinkingConfig;
-      calls.push({ provider: 'gemini', key: req.headers['x-goog-api-key'], model, images: parts.filter((p) => p.inline_data).length, json: json.generationConfig?.responseMimeType, thinking, batch: (prompt.match(/^\[\d+\] /gm) || []).length, understand: prompt.includes('Work out what the person') });
+      calls.push({ provider: 'gemini', key: req.headers['x-goog-api-key'], model, images: parts.filter((p) => p.inline_data).length, json: json.generationConfig?.responseMimeType, thinking, batch: (prompt.match(/^\[\d+\] /gm) || []).length, understand: prompt.includes('Work out what the person'), translate: prompt.startsWith('Translate these'), prompt: prompt.startsWith('Translate these') ? prompt : undefined });
       // An older model that rejects thinking settings, to exercise the fallback.
       if (model === 'gemini-legacy' && thinking) {
         res.writeHead(400).end(JSON.stringify({ error: { message: 'Thinking level is not supported for this model.' } }));
@@ -286,12 +296,25 @@ check(sr.overlays === sr.displays, 'area picker covers every display', `${sr.ove
 check(sr.started && sr.overlaysClosed && A && Math.abs(A.x - sr.want.x) <= 2 && Math.abs(A.y - sr.want.y) <= 2 && Math.abs(A.width - sr.want.width) <= 2 && Math.abs(A.height - sr.want.height) <= 2 && A.displayId === sr.want.displayId,
   'drag a rectangle and press Start: capture begins with that area', JSON.stringify({ got: A, want: sr.want, sel: sr.selected }));
 check(sr.frame?.count === 4 && sr.frame.visible && sr.frame.outside && sr.frame.hugs, 'a border marks the area, just outside it', JSON.stringify(sr.frame));
+check(sr.clear?.strips && sr.clear.bar, 'no FlowDoc window covers the area; the recorder bar is shown beside it', JSON.stringify(sr.clear));
 check(sr.bar?.shown && sr.bar.text === 'Area', 'recorder bar offers to change the area', JSON.stringify(sr.bar));
 const areaTexts = (sr.steps || []).map((s) => s.text);
 check(!areaTexts.some((t) => /Submit/.test(t)), 'clicks outside the area are ignored', areaTexts.join(' / '));
 check(areaTexts.some((t) => /Subject/.test(t) && t.startsWith('Click')) && (sr.steps || []).every((s) => near(s.crop, sr.expectedCrop, 0.004)), 'clicks inside the area are shots cropped to it', JSON.stringify(sr.steps));
 check(areaTexts.some((t) => t.startsWith('Type')), 'typing inside the area is captured', r.checks.demoFocused ? areaTexts.join(' / ') : focusNote);
 check(sr.frameHiddenAfter && sr.saved?.mode === 'area', 'the border goes away when done; the guide remembers the area');
+
+console.log('\nRecorder bar visible to other apps');
+const bv = r.barVisibility || {};
+const allProtected = (list, want) => Array.isArray(list) && list.length === 4 && list.every((p) => p === want);
+check(bv.setting === true && bv.barProtected === true && allProtected(bv.borderProtected, true), 'by default the bar and the area border are hidden from screen captures', JSON.stringify({ bar: bv.barProtected, border: bv.borderProtected }));
+check(bv.checkbox?.was === true && !bv.checkbox.disabled, 'Settings > Capture shows "Hide the recorder bar…" ticked');
+check(bv.off?.saved === false && bv.off.barProtected === false && allProtected(bv.off.borderProtected, false), 'unticking it lets recorders and meetings see the bar and the border', JSON.stringify(bv.off));
+check(bv.barShown && bv.barClickIgnored, 'a click on the visible bar is still not a step');
+check(process.platform === 'linux' || bv.screenGrab?.meanDiff > 20, 'a real screen grab (as a meeting app sees it) shows the bar only when unticked', JSON.stringify(bv.screenGrab));
+check(bv.blurred?.count === 1 && bv.blurred.matches, 'FlowDoc blurs the bar out of its own screenshots', JSON.stringify(bv.blurred));
+check(bv.discarded, 'the test capture was discarded');
+check(bv.restoreBox?.was === false && bv.on?.saved === true && bv.on.barProtected === true && allProtected(bv.on.borderProtected, true), 'ticking it again hides them from captures again', JSON.stringify(bv.on));
 
 // Later checks work on the guide as it is after "Continue capturing".
 const finalSteps = r.guide.steps.length + (ca.added || 0);
@@ -305,7 +328,7 @@ check(r.migration?.model === 'gemini-3.6-flash' && r.migration?.keptChoice === '
 console.log('\nWriting styles');
 const gem = calls.filter((c) => c.provider === 'gemini' && c.key !== 'k'); // 'k' = direct client checks above
 const groq = calls.filter((c) => c.provider === 'groq');
-const stepCalls = gem.filter((c) => c.batch);
+const stepCalls = gem.filter((c) => c.batch && !c.translate);
 const crispCalls = stepCalls.filter((c) => c.images === 0);
 const imageCalls = stepCalls.filter((c) => c.images > 0);
 check(gem.length > 0 && gem.every((c) => c.key === 'test-gemini-key' && c.model === 'gemini-3.6-flash'), 'Gemini requests use saved key and model', `${gem.length} calls`);
@@ -328,6 +351,31 @@ check(r.background.appliedWhileAway && r.ai.groq.title.endsWith('(groq, elaborat
 check(groq.length > 0 && groq.every((c) => c.key === 'Bearer test-groq-key' && c.model === 'qwen/qwen3.8-27b'), 'Groq requests use saved key and model', `${groq.length} calls`);
 check(groq.some((c) => c.images >= 2) && groq.every((c) => c.json === 'json_object' && c.images <= 3), 'Groq receives batched screenshots (max 3) in JSON mode');
 check(groq.every((c) => c.effort === 'none' && c.format === 'hidden'), 'Groq requests disable reasoning and hide it (speed + JSON mode)');
+
+console.log('\nTranslate');
+const tr = r.translate || {};
+const tc = tr.copy || {};
+const trCalls = gem.filter((c) => c.translate);
+check(tr.offButton?.needsAi && tr.offButton.aria === 'true', 'without AI the Translate button is greyed out', JSON.stringify(tr.offButton));
+check(tr.needsAi?.title === 'Translation needs AI' && tr.needsAi.settingsButton && tr.settingsOpened, 'clicking it explains that AI is needed and opens the AI settings', JSON.stringify(tr.needsAi));
+check(tr.onButton && !tr.onButton.needsAi, 'with AI set up the button is active');
+check(
+  tr.dialog?.groups?.join('|') === 'Indian languages|Other languages' && tr.dialog.first === 'தமிழ் (Tamil)' && tr.dialog.hindi === 'हिन्दी (Hindi)' && tr.dialog.english === 'English' && tr.dialog.other,
+  'Indian languages first, native name then English; "Other…" for any language',
+  `${tr.dialog?.first}, ${tr.dialog?.hindi}, …`,
+);
+check(tr.dialog?.selected === 'ta' && tr.dialog.parts?.every(Boolean) && tr.dialog.uiNames === 'keep', 'defaults: Tamil, everything ticked, on-screen names kept');
+check(tc.from && tc.language?.code === 'ta' && tc.sourceUnchanged, 'a translated copy is made; the original guide is unchanged', JSON.stringify(tc.language));
+check(tc.title?.startsWith('தமிழ்: ') && tc.headings?.length && tc.headings.every((h) => h.startsWith('தமிழ்: ')) && tc.notesTranslated, 'title, headings and notes translated', tc.title);
+check(tc.stepsTranslated === tc.steps - 1, 'every step translated except the one whose typed value the AI changed', `${tc.stepsTranslated} of ${tc.steps}`);
+check(tc.typedValueKept, 'a translation that changes a typed value is rejected (the step keeps its original text)');
+check(tc.boldKept, 'on-screen names in bold stay as on screen');
+check(tc.editorLang === 'ta' && tc.editorTitle?.startsWith('தமிழ்: ') && tc.editorTamilBlocks >= tc.stepsTranslated, 'the open editor shows the translation and is marked as Tamil', `title "${tc.editorTitle}", ${tc.editorTamilBlocks} translated blocks shown`);
+check(trCalls.length > 0 && trCalls.every((c) => c.images === 0) && trCalls.some((c) => c.prompt.includes('Tamil (தமிழ்)')) && trCalls.some((c) => c.prompt.includes('Copy it exactly as written, untranslated')), 'requests are text only, name the language and keep on-screen names', `${trCalls.length} requests`);
+const te = tr.exports || {};
+check(te.copy?.questionMarks === 0 && te.copy.images > te.source?.images, 'PDF draws Tamil text itself instead of "???"', `${te.copy?.images} images vs ${te.source?.images} in the English PDF`);
+check(te.htmlLang && te.htmlTamil, 'HTML export is tagged lang="ta"');
+check(/^Translating into தமிழ் \(Tamil\)/.test(tr.stop?.banner || '') && tr.stop.copyRemoved && tr.stop.backToSource, 'Stop removes the half-made copy and reopens the original', tr.stop?.banner);
 
 console.log('\nSettings');
 const models = r.models || [];

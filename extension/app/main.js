@@ -9,8 +9,10 @@ import {
   newId,
   saveGuide,
 } from '../shared/guides.js';
-import { cancelJob, clearJob, estimateRemaining, getJob, isRunning, onJobChange } from './aiJobs.js';
-import { aiEnabled, openImproveDialog, openSettingsDialog } from './desktop.js';
+import { aiHost } from './aiHost.js';
+import { cancelJob, clearJob, estimateRemaining, getJob, isRunning, onJobChange, startTranslateJob } from './aiJobs.js';
+import { aiEnabled, cleanError, openImproveDialog, openNeedsAiDialog, openSettingsDialog, openTranslateDialog } from './desktop.js';
+import { languageLabel } from './languages.js';
 import { exportGuide, FORMATS, guideToPlainText, parseImport, printGuide } from './exporters/index.js';
 import { openImageEditor } from './imageEditor.js';
 import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, renderStepCanvas, renderStepImage, richToHtml } from './render.js';
@@ -50,6 +52,7 @@ const I = {
   dup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg>',
   upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"/></svg>',
   docs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="40" height="40"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h4"/></svg>',
+  translate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h8M8 3v2M10 5c-.6 3.6-2.8 6.6-6 8M6 9c1.2 2 3 3.6 5 4.5M13 21l4-9 4 9M14.5 18h5"/></svg>',
   sparkle: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z"/></svg>',
   app: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>',
   notion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5z"/><path d="M9 16V9l6 7V9"/></svg>',
@@ -57,6 +60,8 @@ const I = {
 };
 
 const desktop = globalThis.flowdocDesktop;
+// AI (Improve, Translate) works in the desktop app and in the extension.
+const hasAi = !!aiHost && (isDesktop || isExtension);
 
 // ---------- small UI helpers ----------
 
@@ -151,8 +156,8 @@ async function renderSidebar(activeId) {
     ...guides.map((g) => {
       const a = document.createElement('a');
       a.href = `#/guide/${g.id}`;
-      a.textContent = g.recording ? `● ${g.title || 'Recording…'}` : `${isDesktop && isRunning(g.id) ? '✨ ' : ''}${g.title || 'Untitled guide'}`;
-      if (isDesktop && isRunning(g.id)) a.title = 'AI is improving this guide';
+      a.textContent = g.recording ? `● ${g.title || 'Recording…'}` : `${hasAi && isRunning(g.id) ? '✨ ' : ''}${g.title || 'Untitled guide'}`;
+      if (hasAi && isRunning(g.id)) a.title = getJob(g.id)?.kind === 'translate' ? 'AI is translating this guide' : 'AI is improving this guide';
       if (g.id === activeId) a.classList.add('on');
       return a;
     }),
@@ -671,7 +676,8 @@ async function renderEditor(id) {
     host = new URL(guide.source?.url || guide.steps.find((s) => s.url)?.url).hostname;
   } catch {}
   const apps = [...new Set(guide.steps.map((s) => s.app).filter(Boolean))];
-  const showAi = isDesktop && !ro && (await aiEnabled());
+  const aiOn = hasAi && (await aiEnabled());
+  const showAi = aiOn && !ro;
 
   view.innerHTML = `
     <div class="doc-bar">
@@ -681,6 +687,7 @@ async function renderEditor(id) {
       <button class="icon-btn" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">${I.undo}</button>
       <button class="icon-btn" data-act="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">${I.redo}</button>
       ${showAi ? `<button class="ghost ai-btn" data-act="ai" title="Rewrite steps and title with AI">${I.sparkle}<span class="label">Improve with AI</span></button>` : ''}
+      ${hasAi && !ro ? `<button class="ghost${aiOn ? '' : ' needs-ai'}" data-act="translate" ${aiOn ? 'title="Make a translated copy of this guide"' : 'aria-disabled="true" title="Translation needs AI. Click to set it up."'}>${I.translate}<span class="label">Translate</span></button>` : ''}
       ${ro || !(isDesktop || isExtension) ? '' : `<button class="ghost" data-act="continue" title="Record more steps and add them after the last step">${'<span class="rec"></span>'}<span class="label">Continue capturing</span></button>`}
       ${ro ? '' : `<button class="ghost" data-act="highlights" aria-pressed="true">${I.target}<span class="label">Highlights</span></button>`}
       <button class="ghost" data-act="copy" title="Copy the steps as plain text">${I.copy}<span class="label">Copy text</span></button>
@@ -690,7 +697,7 @@ async function renderEditor(id) {
       <button class="icon-btn" data-act="more" aria-label="More actions">${I.more}</button>
     </div>
     <div class="editor-wrap">
-      <article class="doc">
+      <article class="doc"${guide.language?.code ? ` lang="${escapeHtml(guide.language.code)}"` : ''}${guide.language?.rtl ? ' dir="rtl"' : ''}>
         ${ro ? '<div class="recording-banner"><span class="badge"></span>Capture in progress. Steps appear here live; editing unlocks when you click Done.</div>' : ''}
         <textarea class="title-input" rows="1" placeholder="Give your guide a title" aria-label="Guide title"></textarea>
         <textarea class="desc-input" rows="1" placeholder="Add a short description of what this guide covers…" aria-label="Description"></textarea>
@@ -755,10 +762,11 @@ async function renderEditor(id) {
   });
   $('[data-act="print"]', view).addEventListener('click', () => printGuide(current));
   $('[data-act="ai"]', view)?.addEventListener('click', () => runAiImprove());
+  $('[data-act="translate"]', view)?.addEventListener('click', () => runTranslate());
   $('[data-act="highlights"]', view)?.addEventListener('click', toggleAllHighlights);
   $('[data-act="continue"]', view)?.addEventListener('click', () => {
     // An AI rewrite in progress would overwrite the new steps when it lands.
-    if (isDesktop && isRunning(current.id)) return toast('Wait for the AI rewrite to finish, or stop it first');
+    if (hasAi && isRunning(current.id)) return toast('Wait for the AI to finish, or stop it first');
     startCaptureDialog({ guideId: current.id });
   });
   $('[data-act="copy"]', view).addEventListener('click', async () => {
@@ -780,12 +788,73 @@ async function renderEditor(id) {
   );
   updateHistoryButtons();
   renderBlocks();
-  if (isDesktop) updateAiBanner();
+  if (hasAi) updateAiBanner();
 }
 
 function runAiImprove(auto = false) {
   if (!current) return;
   openImproveDialog(current, { toast, auto });
+}
+
+// ---------- translate ----------
+
+// Translate makes a copy in the chosen language; the original is untouched.
+// The copy opens straight away and fills in when the AI is done.
+async function runTranslate() {
+  if (!current) return;
+  if (!(await aiEnabled())) {
+    return openNeedsAiDialog('Translation', { toast, onSettingsClosed: () => current && !current.recording && renderEditor(current.id) });
+  }
+  await flushSave();
+  const source = current;
+  const choice = await openTranslateDialog(source, { toast });
+  if (!choice) return;
+  const lang = choice.language;
+  const copy = structuredClone(source);
+  copy.id = newId('g');
+  copy.createdAt = Date.now();
+  copy.steps.forEach((s) => (s.id = newId('s')));
+  copy.language = { code: lang.code, native: lang.native, english: lang.english, ...(lang.rtl ? { rtl: true } : {}) };
+  copy.translatedFrom = { id: source.id, title: source.title || '' };
+  delete copy.recording;
+  delete copy.notion; // the copy is a new page, not the original's
+  delete copy.thumb;
+  // The copy shows "(language)" until the translated title arrives; the job
+  // translates the original title. Save and open the copy before starting,
+  // so the result always lands in the editor that shows it (undoable).
+  copy.title = `${source.title || 'Untitled guide'} (${lang.native || lang.english})`;
+  await saveGuide(copy);
+  location.hash = `#/guide/${copy.id}`;
+  await route();
+  startTranslateJob(
+    { ...copy, title: source.title || '' },
+    { provider: choice.provider, language: lang, parts: choice.parts, uiNames: choice.uiNames, sourceId: source.id },
+  );
+  toast(`Translating into ${languageLabel(lang)}. You can keep working; the copy fills in when it's done.`);
+}
+
+// Writes a translation job's result into its guide. Pieces the user edited
+// while the job ran are left alone.
+function applyTranslation(guide, job) {
+  let changed = 0;
+  for (const [key, text] of job.result.pieces) {
+    const before = job.original.get(key);
+    if (key === 'title' || key === 'description') {
+      // The copy's title had " (language)" added; the translation replaces it.
+      const now = guide[key] || '';
+      const expected = key === 'title' ? `${before} (${job.language.native || job.language.english})` : before;
+      if (now !== expected && now !== before) continue;
+      guide[key] = text;
+      changed++;
+      continue;
+    }
+    const [id, field] = key.split(':');
+    const step = guide.steps.find((s) => s.id === id);
+    if (!step || (step[field] || '') !== before) continue;
+    step[field] = text;
+    changed++;
+  }
+  return changed;
 }
 
 // Writes an AI job's result into a guide. Steps the user edited while the job
@@ -837,29 +906,49 @@ function aiSummaryMessage(job, changed) {
   const others = [...job.models].filter((m) => m && m !== chosen);
   const fellBack = others.length && chosen ? ` (${chosen} was busy, so ${others.join(' and ')} answered)` : '';
   const secs = Math.round((job.finishedAt - job.startedAt) / 1000);
+  if (job.kind === 'translate') return `Translated ${changed} of ${job.total} parts of “${job.title}” into ${languageLabel(job.language)} in ${secs} s${fellBack}.`;
   const parts = [`${changed} step${changed === 1 ? '' : 's'}`];
   if (job.result.title) parts.push('the title');
   if (job.result.sections?.length) parts.push(`${job.result.sections.length} section headings`);
   return `AI improved ${parts.join(', ')} of “${job.title}” in ${secs} s${fellBack}.`;
 }
 
+// A translation that was stopped or got nothing back leaves no half-made
+// copy behind: the copy is removed and the original opened again.
+async function dropTranslation(job, message, opts) {
+  clearJob(job.guideId);
+  const wasOpen = current?.id === job.guideId;
+  if (wasOpen) {
+    clearTimeout(saveTimer);
+    current = null;
+  }
+  await deleteGuide(job.guideId);
+  toast(message, opts);
+  if (wasOpen) location.hash = job.sourceId ? `#/guide/${job.sourceId}` : '#/';
+  else renderSidebar(current?.id);
+}
+
 // Finished jobs land here whether or not their dialog is still open.
-if (isDesktop) {
+if (hasAi) {
   onJobChange(async (job) => {
     updateAiBanner(job);
     renderSidebar(current?.id);
+    if (job.kind === 'translate' && job.status === 'cancelled') return dropTranslation(job, 'Translation stopped. The copy was removed.');
     if (job.status === 'running' || job.status === 'cancelled') return;
     clearJob(job.guideId);
     if (job.status === 'failed') {
-      toast(`AI couldn't improve “${job.title}”: ${String(job.errors[0] || 'no answer').replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, { error: true });
+      const why = cleanError(job.errors[0] || 'no answer');
+      if (job.kind === 'translate') return dropTranslation(job, `AI couldn't translate “${job.title}”: ${why}`, { error: true });
+      toast(`AI couldn't improve “${job.title}”: ${why}`, { error: true });
       return;
     }
-    const settings = await desktop.settings.get();
+    const settings = await aiHost.settings.get();
     job.model = settings.ai.models[job.provider];
+    const apply = job.kind === 'translate' ? applyTranslation : applyAiResult;
     let changed;
     if (current?.id === job.guideId && !current.recording) {
       pushUndo();
-      changed = applyAiResult(current, job);
+      changed = apply(current, job);
       renderBlocks();
       refreshTitleFields();
       scheduleSave();
@@ -867,14 +956,14 @@ if (isDesktop) {
     } else {
       const guide = await getGuide(job.guideId);
       if (!guide) return;
-      changed = applyAiResult(guide, job);
+      changed = apply(guide, job);
       await saveGuide(guide);
       renderSidebar(current?.id);
       toast(`${aiSummaryMessage(job, changed)} Open it from the sidebar.`);
     }
     if (job.errors.length) setTimeout(() => toast(`${job.errors.length} part(s) failed: ${job.errors[0]}`, { error: true }), 2800);
     // Let the user know if they've switched to another window meanwhile.
-    if (!document.hasFocus() && 'Notification' in window) {
+    if (!document.hasFocus() && 'Notification' in window && Notification.permission === 'granted') {
       const n = new Notification('FlowDoc', { body: aiSummaryMessage(job, changed) });
       n.onclick = () => {
         window.focus();
@@ -901,16 +990,20 @@ function updateAiBanner(job = current && getJob(current.id)) {
       <button class="ghost danger" data-act="stop">Stop</button>
     </div>`);
     $('[data-act="view"]', banner).addEventListener('click', () => runAiImprove());
+    $('[data-act="view"]', banner).hidden = job.kind === 'translate';
     $('[data-act="stop"]', banner).addEventListener('click', () => {
+      const kind = getJob(current.id)?.kind;
       cancelJob(current.id);
-      toast('Stopped. Nothing was changed.');
+      if (kind !== 'translate') toast('Stopped. Nothing was changed.');
     });
     doc.prepend(banner);
   }
   const left = estimateRemaining(job);
+  const doing = job.kind === 'translate' ? `Translating into ${languageLabel(job.language)}` : `Improving with AI (${job.style})`;
+  const unit = job.kind === 'translate' ? 'parts' : 'steps';
   const label = job.total
-    ? `Improving with AI (${job.style}) — ${job.done} of ${job.total} steps${left != null ? ` · about ${Math.max(1, Math.round(left / 60000))} min left` : ''}`
-    : `Improving with AI (${job.style}) — ${job.phase}`;
+    ? `${doing} — ${job.done} of ${job.total} ${unit}${left != null ? ` · about ${Math.max(1, Math.round(left / 60000))} min left` : ''}`
+    : `${doing} — ${job.phase}`;
   $('b', banner).textContent = label;
   $('.bar span', banner).style.width = `${job.total ? Math.round((job.done / job.total) * 100) : 8}%`;
 }
@@ -1396,12 +1489,35 @@ if (isDesktop) {
     await route();
   });
 
+}
+
+if (hasAi) {
   const settingsBtn = h(`<button class="nav-item settings-btn">${I.gear} Settings</button>`);
   settingsBtn.addEventListener('click', () =>
-    // The AI button depends on the settings, so refresh the editor afterwards.
+    // The AI buttons depend on the settings, so refresh the editor afterwards.
     openSettingsDialog({ toast, onClose: () => current && !current.recording && renderEditor(current.id) }),
   );
   $('.sidebar-foot').prepend(settingsBtn);
+}
+
+// ---------- side panels (collapse for a full-width guide) ----------
+{
+  const KEY = 'flowdoc.dock';
+  const setDock = (collapsed) => {
+    document.documentElement.classList.toggle('dock-collapsed', collapsed);
+    try {
+      localStorage.setItem(KEY, collapsed ? 'collapsed' : 'open');
+    } catch {}
+    // Keep keyboard focus on the button that brings the other state back.
+    $(collapsed ? '[data-dock="show"]' : '[data-dock="hide"]')?.focus();
+  };
+  document.querySelectorAll('[data-dock]').forEach((b) => b.addEventListener('click', () => setDock(b.dataset.dock === 'hide')));
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '\\') {
+      e.preventDefault();
+      setDock(!document.documentElement.classList.contains('dock-collapsed'));
+    }
+  });
 }
 
 // ---------- theme toggle (System / Light / Dark) ----------
@@ -1414,6 +1530,6 @@ if (isDesktop) {
 }
 
 // Test hook for the end-to-end suites.
-window.flowdocApp = { exportGuide, getGuide, openSample, runAiImprove, route };
+window.flowdocApp = { exportGuide, getGuide, openSample, runAiImprove, runTranslate, route };
 
 route();

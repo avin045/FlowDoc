@@ -4,19 +4,9 @@
 import { safeStorage } from 'electron';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { FALLBACK_MODELS } from './ai.js';
+import { AI_PROVIDERS } from './ai.js';
 
-// gemini-3.6-flash: measured 2026-10-24 at ~4 s for four screenshots, while
-// the newer gemini-3.8-flash sat at 90–150 s or returned 503 "high demand".
-export const AI_PROVIDERS = {
-  gemini: {
-    label: 'Google Gemini',
-    defaultModel: 'gemini-3.6-flash',
-    fallbacks: FALLBACK_MODELS.gemini,
-    keyUrl: 'https://aistudio.google.com/apikey',
-  },
-  groq: { label: 'Groq', defaultModel: 'qwen/qwen3.8-27b', fallbacks: FALLBACK_MODELS.groq, keyUrl: 'https://console.groq.com/keys' },
-};
+export { AI_PROVIDERS };
 
 // Models that were once our default, moved to the current one on upgrade.
 const RETIRED_DEFAULTS = { gemini: ['gemini-3.8-flash'] };
@@ -27,6 +17,8 @@ const DEFAULTS = {
     models: { gemini: AI_PROVIDERS.gemini.defaultModel, groq: AI_PROVIDERS.groq.defaultModel },
     modelLists: {}, // provider -> model IDs from the last "Load models"
     style: 'elaborate', // 'crisp' | 'elaborate' | 'conceptual'
+    // Last choices in the Translate dialog (languages.js).
+    translate: { language: 'ta', custom: '', parts: { title: true, headings: true, steps: true, notes: true }, uiNames: 'keep' },
   },
   notion: {
     // Locations are { id, title, path, crumbs: [{ id, title }] }.
@@ -35,6 +27,7 @@ const DEFAULTS = {
   },
   capture: {
     hideWindow: true, // minimise FlowDoc while capturing
+    hideBar: true, // keep the recorder bar out of screen recordings and meetings
     typedText: true, // include what was typed (passwords are always masked)
     unknownFieldText: false, // include keystrokes when the field type can't be detected
     // What the last capture recorded, offered again next time (see scope.js).

@@ -1,13 +1,14 @@
-// Optional AI write-ups (desktop app only). The renderer prepares the prompt
-// and a cropped, highlighted screenshot; the main process holds the API key and
-// calls Gemini or Groq.
+// Optional AI write-ups and translation (desktop app and extension). This page
+// prepares the prompt and a cropped, highlighted screenshot; aiHost.js sends it
+// to Gemini or Groq with the user's own key.
+import { aiHost } from './aiHost.js';
 import { isNumbered, plainText, renderStepCanvas } from './render.js';
 
 const SYSTEM =
   'You are a technical writer who turns recorded screen actions into clear step-by-step software guides. ' +
   'Write plain, friendly, imperative English. Respond with a single JSON object and nothing else.';
 
-const bridge = () => globalThis.flowdocDesktop?.ai;
+const bridge = () => aiHost.ai;
 
 const quotedValues = (text) => [...String(text || '').matchAll(/["“”]([^"“”]+)["“”]/g)].map((m) => m[1]);
 
@@ -28,8 +29,8 @@ export function extractJson(text) {
 
 // Returns the parsed JSON answer and the model that produced it (the main
 // process may fall back to another model when the chosen one is busy).
-async function ask(prompt, images = []) {
-  const { text, model } = await bridge().complete({ system: SYSTEM, prompt, images, json: true });
+async function ask(prompt, images = [], system = SYSTEM) {
+  const { text, model } = await bridge().complete({ system, prompt, images, json: true });
   return { data: extractJson(text), model };
 }
 
@@ -260,6 +261,150 @@ export async function writeSummary(guide, { style = 'elaborate', context, improv
     description: String(out.description || '').trim().slice(0, 800),
     model,
   };
+}
+
+// ---------- translation ----------
+// Text only (screenshots are not sent), so it's quick. The guide is cut into
+// pieces (title, headings, step text, notes...), sent in batches, and each
+// translated piece is checked before it's used.
+
+const TRANSLATOR =
+  'You are a professional translator of software how-to guides. You write natural, clear, everyday language. ' +
+  'Respond with a single JSON object and nothing else.';
+
+// On-screen names are written in **bold**. The screenshots still show them in
+// the original language, so by default they're left as they are.
+export const UI_NAME_MODES = {
+  keep: {
+    label: 'Keep as on screen',
+    blurb: 'Matches the screenshots: Click **Save** keeps **Save**.',
+    rule: '- Text inside **double asterisks** is an on-screen label (a button, menu or field name). Copy it exactly as written, untranslated, keeping the asterisks.',
+  },
+  both: {
+    label: 'Translate, original in brackets',
+    blurb: 'Both names, for readers who use the app in either language.',
+    rule: '- Text inside **double asterisks** is an on-screen label. Translate it, keep the asterisks, and add the original label in brackets right after, e.g. **<translated label>** (Save).',
+  },
+  translate: {
+    label: 'Translate them',
+    blurb: 'Only if the app itself is used in this language.',
+    rule: '- Text inside **double asterisks** is an on-screen label. Translate it and keep the asterisks.',
+  },
+};
+
+export const TRANSLATE_PARTS = {
+  title: 'Title and description',
+  headings: 'Section headings',
+  steps: 'Step instructions',
+  notes: 'Notes, tips and text blocks',
+};
+
+const PIECE_LABEL = {
+  title: 'guide title',
+  description: 'guide description',
+  heading: 'section heading',
+  step: 'step instruction',
+  note: 'note under a step',
+  tip: 'tip',
+  alert: 'important note',
+  text: 'paragraph',
+};
+
+/**
+ * The pieces of a guide to translate, for the parts chosen.
+ * @returns {{key: string, kind: string, text: string}[]}  key: 'title' | 'description' | '<stepId>:text' | '<stepId>:note'
+ */
+export function translationPieces(guide, parts = {}) {
+  const pieces = [];
+  const add = (key, kind, text) => String(text || '').trim() && pieces.push({ key, kind, text: String(text) });
+  if (parts.title) {
+    add('title', 'title', guide.title);
+    add('description', 'description', guide.description);
+  }
+  for (const s of guide.steps) {
+    if (s.kind === 'heading') {
+      if (parts.headings) add(`${s.id}:text`, 'heading', s.text);
+    } else if (isNumbered(s)) {
+      if (parts.steps) add(`${s.id}:text`, 'step', s.text);
+      if (parts.notes) add(`${s.id}:note`, 'note', s.note);
+    } else if (parts.notes) {
+      add(`${s.id}:text`, PIECE_LABEL[s.kind] ? s.kind : 'text', s.text);
+    }
+  }
+  return pieces;
+}
+
+const languageName = (lang) => (lang.native && lang.native !== lang.english ? `${lang.english} (${lang.native})` : lang.english);
+
+// Pieces go on one line each in the prompt, with line breaks written as \n.
+const oneLine = (text) => text.replace(/\n/g, '\\n');
+
+function translatePrompt(batch, lang, uiNames) {
+  return [
+    `Translate these ${batch.length} pieces of a software how-to guide into ${languageName(lang)}.`,
+    'Write natural, clear, everyday language for a non-technical reader, in the script normally used for this language.',
+    '',
+    'Pieces:',
+    ...batch.map((p, i) => `[${i + 1}] (${PIECE_LABEL[p.kind]}) ${oneLine(p.text)}`),
+    '',
+    'Rules:',
+    (UI_NAME_MODES[uiNames] || UI_NAME_MODES.keep).rule,
+    '- Keep text inside "double quotes" exactly as written: it is something the reader types.',
+    '- Keep URLs, email addresses, file names, folder paths, keyboard shortcuts (like Ctrl+S) and product names unchanged.',
+    '- Keep the formatting: ** marks bold text, and \\n is a line break.',
+    '- Translate everything else. Do not add, leave out or explain anything.',
+    `Return {"items": [{"i": 1, "text": "..."}, ...]} with exactly ${batch.length} entries, in order.`,
+  ].join('\n');
+}
+
+// A translation must keep every typed value, and in "keep" mode every
+// on-screen name, exactly as recorded. Otherwise the piece stays as it was.
+const boldNames = (text) => [...String(text || '').matchAll(/\*\*([^*]+)\*\*/g)].map((m) => m[1]);
+function checkTranslation(piece, text, uiNames) {
+  if (quotedValues(piece.text).some((v) => !text.includes(v))) return 'a typed value was changed';
+  if (uiNames === 'keep' && boldNames(piece.text).some((v) => !text.includes(v))) return 'an on-screen name was changed';
+  return '';
+}
+
+/**
+ * Translates the pieces in batches, several at a time; onProgress(done, total)
+ * fires after each batch.
+ * @returns {Promise<{results: Map<string, string>, errors: string[], models: Set<string>}>}
+ */
+export async function translatePieces(pieces, { provider = 'gemini', language, uiNames = 'keep', onProgress = () => {}, signal } = {}) {
+  const size = 30;
+  const batches = [];
+  for (let i = 0; i < pieces.length; i += size) batches.push(pieces.slice(i, i + size));
+  const results = new Map();
+  const errors = [];
+  const models = new Set();
+  let done = 0;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < batches.length && !signal?.aborted) {
+      const batch = batches[cursor++];
+      try {
+        const { data, model } = await ask(translatePrompt(batch, language, uiNames), [], TRANSLATOR);
+        models.add(model);
+        if (signal?.aborted) return;
+        const list = Array.isArray(data.items) ? data.items : [];
+        batch.forEach((piece, i) => {
+          const entry = list.find((e) => Number(e?.i) === i + 1) || list[i];
+          const text = String(entry?.text || '').replace(/\\n/g, '\n').trim();
+          if (!text || text.length > piece.text.length * 6 + 200) return errors.push(`A ${PIECE_LABEL[piece.kind]} got no usable answer`);
+          const problem = checkTranslation(piece, text, uiNames);
+          if (problem) return errors.push(`A ${PIECE_LABEL[piece.kind]} was kept in the original language (${problem})`);
+          results.set(piece.key, text);
+        });
+      } catch (err) {
+        errors.push(err.message);
+      }
+      done += batch.length;
+      onProgress(done, pieces.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PARALLEL[provider] || 2, batches.length) }, worker));
+  return { results, errors, models };
 }
 
 // Returns { ok, model, ms } so Settings can show which model answered and how fast.

@@ -175,6 +175,25 @@ try {
   await app.waitForTimeout(800);
   check((await markedHidden()).every((h) => !h), 'Highlights toggle shows them again');
 
+  // Side panels collapse for a full-width guide, stay collapsed after a reload,
+  // and Ctrl+\ brings them back.
+  const layout = () =>
+    app.evaluate(() => {
+      const shown = (sel) => !!document.querySelector(sel)?.getClientRects().length;
+      return { sidebar: shown('.sidebar'), outline: shown('.outline'), show: shown('[data-dock="show"]'), doc: Math.round(document.querySelector('.doc').getBoundingClientRect().width) };
+    });
+  const open = await layout();
+  await app.click('[data-dock="hide"]');
+  const collapsed = await layout();
+  check(!collapsed.sidebar && !collapsed.outline && collapsed.show && collapsed.doc > open.doc, 'collapsing hides the sidebar and Contents and widens the guide', `${open.doc}px → ${collapsed.doc}px`);
+  await app.screenshot({ path: join(out, 'editor-collapsed.png') });
+  await app.reload();
+  await app.waitForSelector('.block');
+  check(!(await layout()).sidebar, 'the collapsed layout is remembered after a reload');
+  await app.keyboard.press('Control+Backslash');
+  const docked = await layout();
+  check(docked.sidebar && docked.outline && !docked.show, 'Ctrl+\\ shows the side panels again', JSON.stringify(docked));
+
   await app.evaluate(() => window.scrollTo(0, 0));
   await app.screenshot({ path: join(out, 'editor-edited.png'), fullPage: true });
 
@@ -255,10 +274,86 @@ try {
   const discarded = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
   check(discarded && !discarded.recording && JSON.stringify(snap(discarded)) === JSON.stringify(snap(continued)), 'Discard removes only the new steps and keeps the guide');
 
+  // ---------- AI in the extension: settings, Translate, Improve ----------
+  console.log('\nAI (Translate and Improve)');
+  // A stand-in for Gemini, answering the extension's requests in the page.
+  const aiCalls = [];
+  await context.route('https://generativelanguage.googleapis.com/**', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    const prompt = body.contents?.[0]?.parts?.find((p) => p.text)?.text || '';
+    aiCalls.push({ key: route.request().headers()['x-goog-api-key'], translate: prompt.startsWith('Translate these'), images: (body.contents?.[0]?.parts || []).filter((p) => p.inline_data).length });
+    let answer = {};
+    if (prompt.startsWith('Translate these')) {
+      answer = { items: [...prompt.matchAll(/^\[(\d+)\] \((.*?)\) (.*)$/gm)].map(([, i, , t]) => ({ i: Number(i), text: `हिन्दी: ${t}` })) };
+    } else if (prompt.includes('Draft: ')) {
+      answer = { steps: [...prompt.matchAll(/^\[(\d+)\] \(.*?\) Draft: (.*)$/gm)].map(([, i, d]) => ({ i: Number(i), text: `${d} ✓`, note: '' })) };
+    } else if (prompt.includes('Write a title')) {
+      answer = { title: 'How to open a support ticket (AI)', description: 'Sign in and file a ticket.' };
+    } else if (prompt.includes('Return {"ok": true}')) answer = { ok: true };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] }) });
+  });
+  await app.goto(`chrome-extension://${extId}/app.html#/guide/${guideId}`);
+  await app.waitForSelector('[data-act="translate"]');
+  const trBtn = () => app.evaluate(() => { const b = document.querySelector('[data-act="translate"]'); return { needsAi: b.classList.contains('needs-ai'), improve: !!document.querySelector('[data-act="ai"]') }; });
+  const before = await trBtn();
+  check(before.needsAi && !before.improve, 'without a key: Translate is greyed out, Improve is hidden');
+  await app.click('[data-act="translate"]', { force: true }); // aria-disabled, but clickable on purpose
+  await app.waitForSelector('dialog .needs-ai');
+  check((await app.locator('dialog .needs-ai h2').textContent()) === 'Translation needs AI', 'clicking it explains that AI is needed');
+  await app.click('dialog .needs-ai [data-act="settings"]');
+  await app.waitForSelector('dialog .settings #aiProvider');
+  const sections = await app.evaluate(() => [...document.querySelectorAll('dialog .settings h3')].map((h) => h.textContent.trim()));
+  check(!sections.some((s) => /Guides folder|Notion|Capture/.test(s)) && sections.some((s) => s.startsWith('AI assistant')), 'extension settings show only what applies there', sections.join(', '));
+  check(/browser profile only/.test(await app.locator('dialog .settings .sub').textContent()), 'settings say where the key is kept');
+  await app.selectOption('dialog .settings #aiProvider', 'gemini');
+  await app.fill('dialog .settings #aiKey', 'test-extension-key');
+  await app.click('dialog .settings [data-act="saveKey"]');
+  await app.waitForSelector('dialog .settings [data-act="removeKey"]:not([hidden])');
+  await app.click('dialog .settings [data-act="test"]');
+  await app.waitForFunction(() => /Connected/.test(document.querySelector('dialog .settings .test-result')?.textContent || ''));
+  check(true, 'key saved and Test connection works from the extension');
+  await app.screenshot({ path: join(out, 'extension-ai-settings.png') });
+  await app.click('dialog .settings [data-close]');
+  await app.waitForFunction(() => !document.querySelector('[data-act="translate"]')?.classList.contains('needs-ai'));
+  check((await trBtn()).improve, 'with a key: Translate is active and Improve with AI appears');
+
+  // Polls storage until the guide passes `ok` (waitForFunction can't await).
+  const waitGuide = async (id, ok, ms = 20000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await app.waitForTimeout(250)) {
+      const g = await app.evaluate((gid) => window.flowdocApp.getGuide(gid), id);
+      if (g && ok(g)) return g;
+    }
+    return app.evaluate((gid) => window.flowdocApp.getGuide(gid), id);
+  };
+  const original = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+  await app.click('[data-act="translate"]');
+  await app.waitForSelector('dialog .translate');
+  await app.selectOption('dialog .translate [name="language"]', 'hi');
+  await app.screenshot({ path: join(out, 'extension-translate-dialog.png') });
+  await app.click('dialog .translate .go');
+  await app.waitForFunction((id) => !location.hash.endsWith(id), guideId);
+  const copyId = app.url().split('/').pop();
+  const hindi = await waitGuide(copyId, (g) => g.title.startsWith('हिन्दी: '));
+  const after = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+  const numberedHindi = hindi.steps.filter((s) => s.kind === 'action' || s.kind === 'manual');
+  check(hindi.language?.code === 'hi' && JSON.stringify(after.steps) === JSON.stringify(original.steps), 'Hindi copy made; the original is unchanged', hindi.title);
+  check(numberedHindi.every((s) => s.text.startsWith('हिन्दी: ')), 'every step translated', `${numberedHindi.length} steps`);
+  check(aiCalls.some((c) => c.translate && c.key === 'test-extension-key' && c.images === 0), 'requests go to Gemini with the saved key, text only');
+  await app.screenshot({ path: join(out, 'extension-translated.png') });
+
+  await app.goto(`chrome-extension://${extId}/app.html#/guide/${guideId}`);
+  await app.waitForSelector('[data-act="ai"]');
+  await app.click('[data-act="ai"]');
+  await app.waitForSelector('dialog .improve');
+  await app.click('dialog .improve label.style-card:has(input[value="crisp"])');
+  await app.click('dialog .improve .go');
+  const improved = await waitGuide(guideId, (g) => g.title === 'How to open a support ticket (AI)');
+  check(improved.steps.filter((s) => s.kind === 'action').every((s) => s.text.endsWith('✓')), 'Improve with AI works in the extension', improved.title);
+
   // ---------- library ----------
   await app.goto(`chrome-extension://${extId}/app.html#/`);
   await app.waitForSelector('.card');
-  check((await app.locator('.card').count()) === 1, 'guide listed in the library');
+  check((await app.locator('.card').count()) === 2, 'guide and its translation listed in the library');
   await app.screenshot({ path: join(out, 'library.png') });
 
   // ---------- popup ----------
@@ -267,7 +362,7 @@ try {
   await popup.goto(`chrome-extension://${extId}/popup.html`);
   await popup.waitForSelector('#recent li');
   await popup.screenshot({ path: join(out, 'popup.png') });
-  check((await popup.locator('#recent li').count()) === 1, 'popup lists recent guides');
+  check((await popup.locator('#recent li').count()) === 2, 'popup lists recent guides');
 } catch (err) {
   console.error(err);
   failures++;

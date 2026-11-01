@@ -53,4 +53,10 @@
 
   apply();
   globalThis.flowdocDesktop?.setTheme?.(mode);
+
+  // Side panels hidden for a full-width guide (main.js toggles it). Applied
+  // here too so a collapsed layout doesn't flash open on load.
+  try {
+    if (localStorage.getItem('flowdoc.dock') === 'collapsed') document.documentElement.classList.add('dock-collapsed');
+  } catch {}
 })();

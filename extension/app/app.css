@@ -78,7 +78,8 @@ svg { flex: none; }
   position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 2px;
   padding: 18px 12px; background: var(--panel); border-right: 1px solid var(--line);
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--fg); text-decoration: none; padding: 4px 8px 18px; }
+.brand-row { display: flex; align-items: center; gap: 4px; padding-bottom: 18px; }
+.brand { flex: 1; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--fg); text-decoration: none; padding: 4px 8px; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--fg-2); text-decoration: none; font-weight: 500; }
 .nav-item svg { width: 18px; height: 18px; }
 .nav-item:hover, .nav-item.on { background: var(--soft); color: var(--fg); }
@@ -91,6 +92,15 @@ svg { flex: none; }
 .capture-cta:hover { background: var(--accent-hover); }
 .rec { width: 9px; height: 9px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, .3); display: inline-block; }
 main { min-width: 0; outline: none; }
+
+/* Side panels collapsed: the guide gets the full width. */
+.icon-btn.dock-show { display: none; position: fixed; top: 12px; left: 12px; z-index: 30; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.dock-collapsed .shell { grid-template-columns: minmax(0, 1fr); }
+.dock-collapsed .sidebar, .dock-collapsed .outline { display: none; }
+.dock-collapsed .dock-show { display: inline-flex; }
+.dock-collapsed .editor-wrap { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.dock-collapsed .doc-bar { padding-left: 56px; }
+.dock-collapsed .home { padding-left: 64px; }
 
 /* ---------- buttons ---------- */
 .primary, .secondary, .ghost {
@@ -302,6 +312,21 @@ dialog::backdrop { background: var(--backdrop); }
 .ai-banner .bar { height: 6px; border-radius: 999px; background: var(--panel); overflow: hidden; }
 .ai-banner .bar span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #a855f7); transition: width .4s; }
 @media (max-width: 640px) { .styles { grid-template-columns: 1fr; } }
+/* Translate */
+.translate { width: 600px; }
+.translate h3 { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.translate h3 b { font-weight: 800; }
+.translate .opts { display: flex; flex-direction: column; gap: 2px; }
+.translate .part-count { font-size: 12px; }
+.translate select { min-width: 260px; }
+.translate .error-text { margin: 10px 0 0; }
+.ui-names { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+.ui-names .pill { margin-left: 4px; font-size: 10.5px; vertical-align: 1px; }
+@media (max-width: 640px) { .ui-names { grid-template-columns: 1fr; } }
+/* Greyed out until AI is set up; still clickable, to explain what's needed. */
+.ghost.needs-ai { color: var(--muted); opacity: .6; }
+.ghost.needs-ai:hover { opacity: .85; }
+.needs-ai.dlg { width: 460px; }
 
 /* ---------- Notion ---------- */
 .notion { width: 600px; }
@@ -416,7 +441,8 @@ dialog::backdrop { background: var(--backdrop); }
 @media (max-width: 760px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .brand { padding: 0; margin-right: auto; }
+  .brand-row { padding: 0; margin-right: auto; }
+  .brand { padding: 0; }
   .nav-label, .recent-nav { display: none; }
   .sidebar-foot { border: 0; padding: 0; display: flex; align-items: center; gap: 8px; }
   .theme-toggle { margin: 0; }

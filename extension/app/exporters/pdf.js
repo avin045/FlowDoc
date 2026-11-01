@@ -2,7 +2,8 @@ import { formatDate, parseRuns } from '../render.js';
 
 // jsPDF's built-in Helvetica only covers WinAnsi (Latin-1). Map common
 // typographic characters and replace anything else so text never garbles.
-// (Print → "Save as PDF" is the fallback for other scripts.)
+// Guides in other scripts (Tamil, Hindi, Arabic, Chinese...) are drawn by the
+// browser instead: see canvasText below.
 function latin(text) {
   return String(text ?? '')
     .replace(/[“”„]/g, '"')
@@ -16,6 +17,60 @@ function latin(text) {
     .replace(/[^\x00-\xff]/g, '?');
 }
 
+// Letters Helvetica can't show (Tamil, Devanagari, Arabic, CJK...). A stray
+// symbol alone doesn't count: it becomes "?" and the text stays selectable.
+const NEEDS_CANVAS = /(?![\x00-\xff])[\p{L}\p{M}]/u;
+const modelText = (model) => [model.title, model.description, ...model.blocks.flatMap((b) => [b.text, b.note])].join('\n');
+
+// Lines of text drawn on a canvas, so the browser does the shaping that Indic
+// and other complex scripts need, and placed in the PDF as images.
+const PX_PER_PT = 4; // canvas resolution: 4 px per point is ~290 dpi
+const FONT = 'system-ui, "Segoe UI", "Nirmala UI", "Noto Sans", "Noto Sans Tamil", "Noto Sans Devanagari", sans-serif';
+function canvasText(rtl) {
+  const ctx = document.createElement('canvas').getContext('2d');
+  const font = (bold, size) => `${bold ? 700 : 400} ${size * PX_PER_PT}px ${FONT}`;
+  const graphemes = (text) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((g) => g.segment);
+  return {
+    clean: (text) => String(text ?? ''),
+    // Width in mm.
+    width(text, bold, size) {
+      ctx.font = font(bold, size);
+      return (ctx.measureText(text).width / PX_PER_PT) * 0.3528;
+    },
+    // Splits a word wider than the line (also scripts without spaces).
+    split(text, bold, size, width) {
+      const parts = [''];
+      for (const g of graphemes(text)) {
+        const next = parts[parts.length - 1] + g;
+        if (this.width(next, bold, size) > width && parts[parts.length - 1]) parts.push(g);
+        else parts[parts.length - 1] = next;
+      }
+      return parts;
+    },
+    drawLine(doc, line, x, y, size, color, boxW) {
+      const lhPt = size * 1.4;
+      const wMm = line.reduce((t, seg) => t + seg.w, 0);
+      if (!wMm) return;
+      const c = document.createElement('canvas');
+      c.width = Math.ceil((wMm / 0.3528) * PX_PER_PT) + 4;
+      c.height = Math.ceil(lhPt * PX_PER_PT);
+      const g = c.getContext('2d');
+      g.fillStyle = `rgb(${color.join(',')})`;
+      g.textBaseline = 'alphabetic';
+      g.direction = rtl ? 'rtl' : 'ltr';
+      let cx = rtl ? c.width - 2 : 2;
+      for (const seg of line) {
+        g.font = font(seg.bold, size);
+        g.textAlign = rtl ? 'right' : 'left';
+        g.fillText(seg.text, cx, size * PX_PER_PT * 1.05);
+        cx += (rtl ? -1 : 1) * (seg.w / 0.3528) * PX_PER_PT;
+      }
+      const left = rtl ? x + boxW - wMm : x;
+      doc.addImage(c.toDataURL('image/png'), 'PNG', left - (2 / PX_PER_PT) * 0.3528, y, (c.width / PX_PER_PT) * 0.3528, lhPt * 0.3528, undefined, 'FAST');
+    },
+  };
+}
+
 const ACCENT = [79, 70, 229];
 const MUTED = [100, 116, 139];
 const FG = [15, 23, 42];
@@ -24,6 +79,22 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: pageSize, compress: true });
   doc.setProperties({ title: model.title, creator: 'FlowDoc' });
+
+  // Helvetica text, or browser-drawn text for scripts it can't show.
+  const raster = NEEDS_CANVAS.test(modelText(model)) ? canvasText(!!model.rtl) : null;
+  const text = raster || {
+    clean: latin,
+    width: (t, bold, size) => {
+      doc.setFontSize(size);
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      return doc.getTextWidth(t);
+    },
+    split: (t, bold, size, width) => {
+      doc.setFontSize(size);
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      return doc.splitTextToSize(t, width);
+    },
+  };
 
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -43,12 +114,10 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
   // Lays out mixed bold/regular runs with word wrapping. Returns the lines so
   // the height can be measured before drawing.
   function layout(runs, width, size) {
-    doc.setFontSize(size);
     const lines = [[]];
     let lineW = 0;
     for (const run of runs) {
-      doc.setFont('helvetica', run.bold ? 'bold' : 'normal');
-      const pieces = latin(run.text).split(/(\s+|\n)/);
+      const pieces = text.clean(run.text).split(/(\s+|\n)/);
       for (const piece of pieces) {
         if (!piece) continue;
         if (piece.includes('\n')) {
@@ -56,7 +125,7 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
           lineW = 0;
           continue;
         }
-        const w = doc.getTextWidth(piece);
+        const w = text.width(piece, run.bold, size);
         const isSpace = /^\s+$/.test(piece);
         if (lineW + w > width && !isSpace && lineW > 0) {
           lines.push([]);
@@ -65,8 +134,8 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
         if (isSpace && lineW === 0) continue;
         // Words longer than a line are hard-split.
         if (w > width) {
-          for (const part of doc.splitTextToSize(piece, width)) {
-            const pw = doc.getTextWidth(part);
+          for (const part of text.split(piece, run.bold, size, width)) {
+            const pw = text.width(part, run.bold, size);
             if (lineW > 0) lines.push([]);
             lines[lines.length - 1].push({ text: part, bold: run.bold, w: pw });
             lineW = pw;
@@ -80,8 +149,15 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
     return lines;
   }
 
-  function drawLines(lines, x, size, color = FG) {
+  function drawLines(lines, x, size, color = FG, boxW = contentW - (x - margin)) {
     const lh = size * 0.3528 * 1.4; // pt → mm, 1.4 line height
+    if (raster) {
+      for (const line of lines) {
+        raster.drawLine(doc, line, x, y, size, color, boxW);
+        y += lh;
+      }
+      return;
+    }
     doc.setFontSize(size);
     doc.setTextColor(...color);
     for (const line of lines) {
@@ -137,7 +213,7 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
         doc.setFillColor(...bar);
         doc.rect(margin + indent, y, 1.2, h + 6, 'F');
         y += 3;
-        drawLines(lines, margin + indent + 5, 10.5);
+        drawLines(lines, margin + indent + 5, 10.5, FG, w);
         y += 9;
       } else {
         drawLines(lines, margin + indent, 10.5);
@@ -202,7 +278,17 @@ export async function exportPdf(model, { pageSize = 'a4' } = {}) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...MUTED);
-    doc.text(latin(model.title).slice(0, 90), margin, pageH - 8);
+    if (raster) {
+      const saved = y;
+      y = pageH - 8 - 8 * 0.3528 * 1.05;
+      drawLines(layout([{ text: model.title.slice(0, 90), bold: false }], contentW - 30, 8).slice(0, 1), margin, 8, MUTED);
+      y = saved;
+    } else {
+      doc.text(latin(model.title).slice(0, 90), margin, pageH - 8);
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...MUTED);
     doc.text(`Page ${i} of ${pages}`, pageW - margin, pageH - 8, { align: 'right' });
   }
   return doc.output('blob');

@@ -50,7 +50,7 @@ export function guideToHtml(model, { autoPrint = false } = {}) {
     }
   }
   return `<!doctype html>
-<html lang="en">
+<html lang="${escapeHtml(model.language?.code || 'en')}"${model.rtl ? ' dir="rtl"' : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

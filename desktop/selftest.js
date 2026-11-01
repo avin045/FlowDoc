@@ -3,12 +3,12 @@
 // screen capture and the accessibility inspector run for real, without moving
 // the user's mouse), exercises AI enhancement against a mock server, runs the
 // exporters inside the workspace, and writes results.json for the runner.
-import { BrowserWindow, nativeTheme, screen } from 'electron';
+import { BrowserWindow, desktopCapturer, nativeTheme, screen } from 'electron';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import uiohookPkg from 'uiohook-napi';
-import { getGuide, saveGuide } from '../extension/shared/guides.js';
+import { deleteGuide, getGuide, saveGuide } from '../extension/shared/guides.js';
 import { createSettings } from './settings.js';
 import { folderUsable } from './store.js';
 
@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const progress = (msg) => console.log(`[selftest] ${msg}`);
 const within = (promise, ms) => Promise.race([promise, sleep(ms)]);
 
-export async function runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, markCapturable, getWidget }) {
+export async function runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, applyBarProtection, markCapturable, getWidget }) {
   const out = process.env.FLOWDOC_TEST_OUT;
   mkdirSync(out, { recursive: true });
   const results = { checks: {}, notes: [] };
@@ -368,6 +368,10 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
       outside: strips.every((r) => r.x + r.width <= a.x || r.x >= a.x + a.width || r.y + r.height <= a.y || r.y >= a.y + a.height),
       hugs: strips.every((r) => r.x <= a.x + a.width + 4 && r.x + r.width >= a.x - 4 && r.y <= a.y + a.height + 4 && r.y + r.height >= a.y - 4),
     };
+    // Real window bounds: nothing of FlowDoc's may sit over the area itself.
+    const over = (r) => r.x < a.x + a.width && r.x + r.width > a.x && r.y < a.y + a.height && r.y + r.height > a.y;
+    const bar = getWidget().getBounds();
+    results.scope.area.clear = { strips: strips.every((r) => !over(r)), bar: getWidget().isVisible() && !over(bar), barBounds: bar };
     results.scope.area.bar = await widgetJs(`(() => { const b = document.getElementById('scope'); return { shown: !b.hidden, text: b.textContent.trim() }; })()`);
     await click('#submit'); // outside the area
     await click('#subject'); // inside
@@ -383,6 +387,92 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     results.scope.area.saved = areaGuide.captureScope;
   } else {
     for (const w of areaPicker.windows) w.webContents.send('area:clear');
+  }
+
+  // ---------- recorder bar visible to other apps (Settings > Capture) ----------
+  // Unticking "Hide the recorder bar…" lets screen recorders and meetings see
+  // the bar and the area border; FlowDoc's own shots blur the bar instead, and
+  // clicks on it are still not steps.
+  progress('recorder bar visibility');
+  {
+    const bar = getWidget();
+    const prot = (w) => (typeof w.isContentProtected === 'function' ? w.isContentProtected() : null);
+    const probe = { x: 200, y: 200, width: 300, height: 200 };
+    const borderProtected = () => {
+      areaFrame.show(probe);
+      const all = areaFrame.windows().map(prot);
+      areaFrame.hide();
+      return all;
+    };
+    const bv = { setting: (await settings.get()).capture.hideBar, barProtected: prot(bar), borderProtected: borderProtected() };
+    const toggle = async () => {
+      await mainJs(`document.querySelector('.settings-btn').click()`);
+      for (let i = 0; i < 30 && !(await mainJs(`!!document.querySelector('dialog [name="hideBar"]')`)); i++) await sleep(100);
+      await mainJs(`document.querySelector('dialog [name="hideBar"]').scrollIntoView({ block: 'center' })`);
+      if (!bv.pictured) {
+        await sleep(300);
+        await shot(mainWin, 'desktop-settings-capture.png');
+        bv.pictured = true;
+      }
+      const box = await mainJs(`(() => { const c = document.querySelector('dialog [name="hideBar"]'); c.click(); return { was: !c.checked, disabled: c.disabled }; })()`);
+      await sleep(500);
+      await mainJs(`document.querySelector('dialog [data-close]').click()`);
+      await sleep(200);
+      return box;
+    };
+    bv.checkbox = await toggle();
+    bv.off = { saved: (await settings.get()).capture.hideBar, barProtected: prot(bar), borderProtected: borderProtected() };
+    demo.focus();
+    await sleep(400);
+    const started = await startRecording({ scope: { mode: 'screen' } });
+    await sleep(600);
+    const b = bar.getBounds();
+    bv.barShown = bar.isVisible();
+    const before = recorder.state.stepCount;
+    // On a small screen the demo can sit under the bar, and the test marks the
+    // demo as a window to record; hide it so the click is only on the bar.
+    demo.hide();
+    const phys = toPhysical({ x: Math.round(b.x + 12), y: Math.round(b.y + b.height / 2) });
+    recorder.simulate.mousedown({ x: phys.x, y: phys.y, button: 1, clicks: 1 });
+    await sleep(700);
+    await recorder.drain();
+    bv.barClickIgnored = recorder.state.stepCount === before;
+    // What a screen recorder or meeting app sees: grab the screen with the bar
+    // visible to captures, then hidden, and compare the bar's spot.
+    const barPixels = async () => {
+      await sleep(400);
+      const d = screen.getDisplayMatching(b);
+      const size = { width: Math.round(d.bounds.width * d.scaleFactor), height: Math.round(d.bounds.height * d.scaleFactor) };
+      const src = (await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size })).find((x) => x.display_id === String(d.id)) || null;
+      if (!src) return null;
+      const img = src.thumbnail;
+      const k = img.getSize().width / d.bounds.width;
+      return img.crop({ x: Math.round((b.x - d.bounds.x) * k), y: Math.round((b.y - d.bounds.y) * k), width: Math.round(b.width * k), height: Math.round(b.height * k) }).toBitmap();
+    };
+    const seen = await barPixels();
+    applyBarProtection(true);
+    const unseen = await barPixels();
+    applyBarProtection(false);
+    if (seen && unseen && seen.length === unseen.length) {
+      let diff = 0;
+      for (let i = 0; i < seen.length; i += 4) diff += Math.abs(seen[i] - unseen[i]) + Math.abs(seen[i + 1] - unseen[i + 1]) + Math.abs(seen[i + 2] - unseen[i + 2]);
+      bv.screenGrab = { meanDiff: Math.round(diff / (seen.length / 4)) };
+    } else bv.screenGrab = { error: 'no screen source' };
+    demo.showInactive();
+    await sleep(300);
+    await click('#subject');
+    await recorder.drain();
+    const g = await getGuide(started.guideId);
+    const last = g.steps.filter((s) => s.kind === 'action').at(-1);
+    const d = screen.getDisplayMatching(b).bounds;
+    const want = { x: (b.x - d.x) / d.width, y: (b.y - d.y) / d.height, w: b.width / d.width, h: b.height / d.height };
+    const r = last?.redactions?.[0];
+    bv.blurred = { count: last?.redactions?.length || 0, matches: !!r && ['x', 'y', 'w', 'h'].every((k) => Math.abs(r[k] - want[k]) < 0.01) };
+    await recorder.discard();
+    bv.discarded = !(await getGuide(started.guideId));
+    bv.restoreBox = await toggle();
+    bv.on = { saved: (await settings.get()).capture.hideBar, barProtected: prot(bar), borderProtected: borderProtected() };
+    results.barVisibility = bv;
   }
   demo.destroy();
   await shot(mainWin, 'desktop-editor.png');
@@ -451,6 +541,114 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   }, 60000);
   results.background.appliedWhileAway = !!afterGroq;
   results.ai.groq = summarize(afterGroq || (await getGuide(guideId)));
+
+  // ---------- translate ----------
+  progress('translate');
+  const tr = (results.translate = {});
+  const buttonState = () => js(`(() => { const b = document.querySelector('[data-act="translate"]'); return b ? { needsAi: b.classList.contains('needs-ai'), aria: b.getAttribute('aria-disabled') } : null; })()`);
+  // Without AI the button is greyed out, and clicking it says what's needed.
+  await settings.update({ ai: { provider: 'off' } });
+  await openGuide();
+  tr.offButton = await buttonState();
+  await js(`document.querySelector('[data-act="translate"]').click()`);
+  await sleep(500);
+  tr.needsAi = await js(`(() => { const d = document.querySelector('dialog .needs-ai'); return d ? { title: d.querySelector('h2').textContent, settingsButton: !!d.querySelector('[data-act="settings"]') } : null; })()`);
+  await shot(mainWin, 'desktop-translate-needs-ai.png');
+  await js(`document.querySelector('dialog .needs-ai [data-act="settings"]').click()`);
+  await sleep(500);
+  tr.settingsOpened = await js(`!!document.querySelector('dialog .settings #aiProvider')`);
+  await js(`document.querySelector('dialog .settings [data-close]').click()`);
+  await sleep(400);
+
+  // With AI: translate into Tamil (the default), keeping on-screen names.
+  await settings.update({ ai: { provider: 'gemini', models: { gemini: 'gemini-3.6-flash' } } });
+  await settings.setKey('gemini', 'test-gemini-key');
+  await openGuide();
+  tr.onButton = await buttonState();
+  const source = await getGuide(guideId);
+  const sourceTexts = JSON.stringify(source.steps.map((s) => [s.text, s.note || '']));
+  await js(`document.querySelector('[data-act="translate"]').click()`);
+  await waitFor(() => js(`!!document.querySelector('dialog .translate')`), 5000);
+  tr.dialog = await js(`(() => {
+    const d = document.querySelector('dialog .translate');
+    const sel = d.querySelector('[name="language"]');
+    const label = (v) => [...sel.options].find((o) => o.value === v)?.textContent;
+    return {
+      groups: [...sel.querySelectorAll('optgroup')].map((g) => g.label),
+      first: sel.options[0].textContent, selected: sel.value,
+      tamil: label('ta'), hindi: label('hi'), english: label('en'), other: !!label('other'),
+      parts: [...d.querySelectorAll('[name="part"]')].map((b) => b.checked),
+      uiNames: d.querySelector('[name="uiNames"]:checked').value,
+    };
+  })()`);
+  await shot(mainWin, 'desktop-translate-dialog.png');
+  await js(`document.querySelector('dialog .translate .go').click()`);
+  const copyId = await waitFor(async () => {
+    const id = (await js('location.hash')).split('/').pop();
+    return id && id !== guideId ? id : null;
+  }, 5000);
+  const copy = await waitFor(async () => {
+    const g = copyId && (await getGuide(copyId));
+    return g && g.title.startsWith('தமிழ்: ') && g;
+  }, 30000);
+  await sleep(800);
+  if (copy) {
+    const numbered = copy.steps.filter((s) => s.kind === 'action' || s.kind === 'manual');
+    const typed = copy.steps.find((s) => String(s.text).includes('Printer offline'));
+    tr.copy = {
+      language: copy.language,
+      from: copy.translatedFrom?.id === guideId,
+      title: copy.title,
+      sourceUnchanged: JSON.stringify((await getGuide(guideId)).steps.map((s) => [s.text, s.note || ''])) === sourceTexts,
+      stepsTranslated: numbered.filter((s) => s.text.startsWith('தமிழ்: ')).length,
+      steps: numbered.length,
+      headings: copy.steps.filter((s) => s.kind === 'heading').map((s) => s.text),
+      notesTranslated: copy.steps.filter((s) => s.note).every((s) => s.note.startsWith('தமிழ்: ')),
+      typedValueKept: !!typed && !typed.text.startsWith('தமிழ்: ') && typed.text === source.steps.find((s) => s.text.includes('Printer offline'))?.text,
+      boldKept: numbered.some((s) => /^தமிழ்: .*\*\*[A-Za-z][^*]*\*\*/.test(s.text)),
+      editorLang: await js(`document.querySelector('.doc')?.getAttribute('lang')`),
+      // The open editor shows the translation too (not an older copy).
+      editorTitle: await js(`document.querySelector('.title-input')?.value || ''`),
+      editorTamilBlocks: await js(`[...document.querySelectorAll('.b-text')].filter((e) => e.textContent.startsWith('தமிழ்: ')).length`),
+    };
+    await shot(mainWin, 'desktop-translated.png');
+    // Exports: Helvetica can't draw Tamil, so the PDF draws that text itself.
+    tr.exports = await js(`(async () => {
+      const { exportGuide, getGuide } = window.flowdocApp;
+      const pdf = async (id) => {
+        const t = await (await exportGuide(await getGuide(id), 'pdf')).blob.text();
+        return { images: (t.match(/\\/Subtype \\/Image/g) || []).length, questionMarks: (t.match(/\\?\\?\\?/g) || []).length };
+      };
+      const html = await (await exportGuide(await getGuide('${copyId}'), 'html')).blob.text();
+      return { source: await pdf('${guideId}'), copy: await pdf('${copyId}'), htmlLang: html.includes('<html lang="ta"'), htmlTamil: html.includes('தமிழ்: ') };
+    })()`);
+    // Kept for a look at the pages.
+    const tamilPdf = await js(`(async () => { const b = (await window.flowdocApp.exportGuide(await window.flowdocApp.getGuide('${copyId}'), 'pdf')).blob; const r = new FileReader(); return new Promise((ok) => { r.onload = () => ok(r.result.split(',')[1]); r.readAsDataURL(b); }); })()`);
+    writeFileSync(join(out, 'desktop-translated-tamil.pdf'), Buffer.from(tamilPdf, 'base64'));
+  }
+
+  // Stop: the half-made copy is removed and the original opens again. (The
+  // Groq mock is slow, so there's time to stop it.)
+  await settings.update({ ai: { provider: 'groq', models: { groq: 'qwen/qwen3.8-27b' } } });
+  await settings.setKey('groq', 'test-groq-key');
+  await openGuide();
+  await js(`document.querySelector('[data-act="translate"]').click()`);
+  await waitFor(() => js(`!!document.querySelector('dialog .translate')`), 5000);
+  await js(`document.querySelector('dialog .translate .go').click()`);
+  const stopId = await waitFor(async () => {
+    const id = (await js('location.hash')).split('/').pop();
+    return id && id !== guideId && id !== copyId ? id : null;
+  }, 5000);
+  await waitFor(() => js(`!!document.querySelector('.ai-banner [data-act="stop"]')`), 5000);
+  tr.stop = { banner: await js(`document.querySelector('.ai-banner b')?.textContent || ''`) };
+  await js(`document.querySelector('.ai-banner [data-act="stop"]').click()`);
+  await sleep(1500);
+  tr.stop.copyRemoved = !!stopId && !(await getGuide(stopId));
+  tr.stop.backToSource = (await js('location.hash')) === `#/guide/${guideId}`;
+  await sleep(3500); // let the stopped request finish before the next part
+  // Later checks count the guides in the library; take the copy out again.
+  if (copyId) await deleteGuide(copyId);
+  await settings.update({ ai: { provider: 'gemini', models: { gemini: 'gemini-3.6-flash' } } });
 
   // ---------- model picker ----------
   progress('settings: models + theme');

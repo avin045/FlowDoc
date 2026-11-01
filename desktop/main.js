@@ -110,7 +110,9 @@ const recorder = createRecorder({
   settings,
   isOwnWindow,
   isOwnElement,
-  widgetBounds: () => (widgetWin && widgetWin.isVisible() ? widgetWin.getBounds() : null),
+  // Bounds only when the bar can show up in our own screenshots, so the
+  // recorder blurs it there.
+  widgetBounds: () => (widgetWin && widgetWin.isVisible() && !barHiddenFromCaptures() ? widgetWin.getBounds() : null),
   log,
 });
 
@@ -132,6 +134,17 @@ const areaPicker = createAreaPicker({
   log,
 });
 const areaFrame = createAreaFrame();
+
+// Settings > Capture > "Hide the recorder bar from screen recordings". Content
+// protection keeps the bar (and the area border) out of every capture: ours,
+// screen recorders and meeting apps. It only works on Windows and macOS.
+let hideBar = true;
+const barHiddenFromCaptures = () => hideBar && process.platform !== 'linux';
+function applyBarProtection(hide = hideBar) {
+  hideBar = hide !== false;
+  widgetWin?.setContentProtection(hideBar);
+  areaFrame.setProtected(hideBar);
+}
 
 // Apps for the "Specific apps" picker, with icons. `keep` lists chosen apps
 // that should stay listed even if they're closed right now.
@@ -201,15 +214,31 @@ function createWidget() {
     webPreferences: { preload: join(here, 'widget-preload.cjs'), contextIsolation: true, sandbox: true },
   });
   widgetWin.setAlwaysOnTop(true, 'screen-saver');
-  // Keeps the recorder bar out of screenshots (Windows 10 2004+ and macOS).
-  widgetWin.setContentProtection(true);
+  // Keeps the recorder bar out of screenshots (Windows 10 2004+ and macOS)
+  // unless the user turned that off.
+  widgetWin.setContentProtection(hideBar);
   widgetWin.loadFile(join(here, 'widget.html'));
 }
 
+// Bottom centre of the primary display. In area mode the bar must not cover
+// the area, so it moves just below it (or above it) when they would overlap.
 function placeWidget() {
-  const area = screen.getPrimaryDisplay().workArea;
   const [w, h] = widgetWin.getSize();
-  widgetWin.setPosition(Math.round(area.x + (area.width - w) / 2), Math.round(area.y + area.height - h - 12));
+  const s = recorder.state;
+  const area = s.active && s.scope?.mode === 'area' ? s.scope.area : null;
+  const work = (area ? screen.getDisplayMatching(area) : screen.getPrimaryDisplay()).workArea;
+  let x = Math.round(work.x + (work.width - w) / 2);
+  let y = Math.round(work.y + work.height - h - 12);
+  const gap = 10;
+  const overlaps = (yy) => area && x < area.x + area.width + gap && x + w > area.x - gap && yy < area.y + area.height + gap && yy + h > area.y - gap;
+  if (overlaps(y)) {
+    const below = area.y + area.height + gap;
+    const above = area.y - gap - h;
+    if (below + h <= work.y + work.height) y = below;
+    else if (above >= work.y) y = above;
+    else x = area.x + area.width + gap + w <= work.x + work.width ? area.x + area.width + gap : Math.max(work.x, area.x - gap - w);
+  }
+  widgetWin.setPosition(Math.round(x), Math.round(y));
 }
 
 function broadcast(channel, payload) {
@@ -247,6 +276,7 @@ async function startRecording(opts = {}) {
   }
   placeWidget();
   widgetWin.showInactive();
+  widgetWin.moveTop();
   // Offered again next time. Only the parts this capture used are replaced.
   settings.update({ capture: { lastScope: state.scope } }).catch(() => {});
   return state;
@@ -262,15 +292,22 @@ async function reselectArea() {
   const area = await areaPicker.pick({ initial: s.scope.area });
   if (area) await recorder.setArea(area);
   if (!s.paused) recorder.setPaused(false);
-  if (recorder.state.active) widgetWin?.showInactive();
+  if (recorder.state.active) {
+    placeWidget();
+    widgetWin?.showInactive();
+    widgetWin?.moveTop();
+  }
   return recorder.state;
 }
 
 recorder.events.on('state', (state) => {
   broadcast('recorder:state', state);
   updateTray(state);
-  if (state.active && state.scope?.mode === 'area' && !areaPicker.open) areaFrame.show(state.scope.area, { paused: state.paused });
-  else areaFrame.hide();
+  if (state.active && state.scope?.mode === 'area' && !areaPicker.open) {
+    areaFrame.show(state.scope.area, { paused: state.paused });
+    // The border shares the bar's "always on top" level; keep the bar in front.
+    if (widgetWin?.isVisible()) widgetWin.moveTop();
+  } else areaFrame.hide();
 });
 
 recorder.events.on('stray', (app) => widgetWin?.webContents.send('recorder:stray', app));
@@ -337,7 +374,11 @@ function registerIpc() {
   });
 
   ipcMain.handle('settings:get', () => settings.getPublic());
-  ipcMain.handle('settings:update', (_e, patch) => settings.update(patch));
+  ipcMain.handle('settings:update', async (_e, patch) => {
+    const next = await settings.update(patch);
+    if (patch?.capture && 'hideBar' in patch.capture) applyBarProtection((await settings.get()).capture.hideBar);
+    return next;
+  });
   ipcMain.handle('settings:setKey', (_e, provider, key) => settings.setKey(provider, key));
 
   ipcMain.handle('ai:complete', async (_e, req) => {
@@ -440,6 +481,7 @@ app.whenReady().then(async () => {
   }
   // Apply the saved theme before the first window paints.
   nativeTheme.themeSource = (await settings.get()).ui?.theme || 'system';
+  hideBar = (await settings.get()).capture?.hideBar !== false;
   createMainWindow();
   createWidget();
 
@@ -456,7 +498,7 @@ app.whenReady().then(async () => {
 
   if (process.env.FLOWDOC_SELFTEST) {
     const { runSelfTest } = await import('./selftest.js');
-    runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, markCapturable: (w) => capturableWindows.add(w), getWidget: () => widgetWin }).catch((err) => {
+    runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, applyBarProtection, markCapturable: (w) => capturableWindows.add(w), getWidget: () => widgetWin }).catch((err) => {
       console.error(err);
       app.exit(1);
     });

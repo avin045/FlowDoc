@@ -1,8 +1,8 @@
-// Background AI jobs (desktop). A job keeps running when its dialog is closed
+// Background AI jobs (Improve with AI, Translate). A job keeps running when its dialog is closed
 // or another guide is opened; listeners get progress and the final result.
 // Applying the result to the guide is up to the caller (main.js), which knows
 // whether the guide is open in the editor (undoable) or only in storage.
-import { improveSteps, understandGuide, writeSummary } from './ai.js';
+import { improveSteps, translatePieces, translationPieces, understandGuide, writeSummary } from './ai.js';
 import { isNumbered } from './render.js';
 
 const jobs = new Map(); // guideId -> job
@@ -36,6 +36,7 @@ export function startJob(guide, { provider, style = 'elaborate', steps = true, s
   const numbered = snapshot.steps.filter((s) => isNumbered(s) && s.text);
   const controller = new AbortController();
   const job = {
+    kind: 'improve',
     guideId: guide.id,
     title: guide.title || 'Untitled guide',
     style,
@@ -112,6 +113,68 @@ export function startJob(guide, { provider, style = 'elaborate', steps = true, s
     job.result = out;
     job.finishedAt = Date.now();
     job.status = out.steps.size || out.title || out.description ? 'done' : 'failed';
+    emit(job);
+  })();
+  return job;
+}
+
+/**
+ * Translates a guide (normally a fresh copy of the one the user picked).
+ * @param guide   the guide to write into (a snapshot of its text is taken)
+ * @param options { provider, language: {code, native, english}, parts, uiNames }
+ */
+export function startTranslateJob(guide, { provider, language, parts, uiNames = 'keep', sourceId } = {}) {
+  const running = jobs.get(guide.id);
+  if (running?.status === 'running') return running;
+  const pieces = translationPieces(guide, parts);
+  const controller = new AbortController();
+  const job = {
+    kind: 'translate',
+    guideId: guide.id,
+    sourceId,
+    title: guide.title || 'Untitled guide',
+    language,
+    provider,
+    status: 'running',
+    phase: 'Translating…',
+    done: 0,
+    total: pieces.length,
+    startedAt: Date.now(),
+    stepsStartedAt: Date.now(),
+    errors: [],
+    models: new Set(),
+    // Each piece's text when the job started; pieces edited meanwhile are left alone.
+    original: new Map(pieces.map((p) => [p.key, p.text])),
+    result: null,
+    controller,
+  };
+  jobs.set(guide.id, job);
+  emit(job);
+
+  (async () => {
+    let results = new Map();
+    try {
+      const r = await translatePieces(pieces, {
+        provider,
+        language,
+        uiNames,
+        signal: controller.signal,
+        onProgress: (done, total) => {
+          job.done = done;
+          job.total = total;
+          emit(job);
+        },
+      });
+      results = r.results;
+      job.errors.push(...r.errors);
+      r.models.forEach((m) => job.models.add(m));
+    } catch (err) {
+      job.errors.push(err.message);
+    }
+    if (controller.signal.aborted) return;
+    job.result = { pieces: results };
+    job.finishedAt = Date.now();
+    job.status = results.size ? 'done' : 'failed';
     emit(job);
   })();
   return job;

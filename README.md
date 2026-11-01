@@ -166,6 +166,7 @@ Do this before your first capture on Linux:
    - Click **New capture** at the bottom of FlowDoc's left sidebar.
    - Press **`Alt+Shift+R`**, which works from any app.
    - Right-click the **tray icon** and choose **Start capture**.
+   With **New capture**, FlowDoc first asks **what to record**: **Whole screen**, **An area** or **Specific apps** (see [Record only an area or only some apps](#record-only-an-area-or-only-some-apps) below). It starts from your last choice. The shortcut and the tray icon always record the whole screen.
 3. FlowDoc minimises itself, and a dark **recorder bar** appears at the bottom-centre of the screen. It shows:
    - the step count and elapsed time;
    - **Pause / Resume**: pause while you do something private;
@@ -173,11 +174,34 @@ Do this before your first capture on Linux:
    - **Done**: stop and build the guide.
 
    To move the bar, drag it by its left part (the dot, the "Capturing" label and the counter).
+
+   By default the bar is hidden from screen recorders and meeting apps (Teams, Zoom, Meet, OBS…), so people watching your shared screen don't see it. To let them see it, untick **Settings → Capture → Hide the recorder bar from screen recordings and meetings** ([A7](#a7-capture-settings)).
 4. Work through your process normally, across as many apps as you like. For example: open File Explorer, double-click a folder, right-click and choose **New → Folder**, type a name, press Enter, then switch to the browser and upload the file.
 5. When you're finished, click **Done** on the bar. You can also press `Alt+Shift+R` again, or use the tray icon's **Stop capture**.
 6. FlowDoc comes back to the front with the finished guide open in the editor. Continue with [Guide C](#guide-c-editing-and-exporting-a-guide).
 
 > **Tip:** move a little slower than usual and pause briefly after typing. The pause lets FlowDoc read the finished text from the field, so the step shows exactly what you typed.
+
+#### Record only an area or only some apps
+
+**An area** records only what happens inside a rectangle you choose:
+
+1. Choose **An area** and click **Start capture**. FlowDoc steps aside and the screen dims (on every display).
+2. Drag a rectangle, or click a window to take its whole frame. Move it by dragging the inside, and resize it with the handles.
+3. Press **Enter**, double-click inside the area, or click **Start capture** below it. **Esc** or **Cancel** goes back without recording.
+4. While capturing:
+   - A thin **purple border** sits just *outside* the area. Nothing covers the area itself, and the border never appears in screenshots. It turns **grey** while paused.
+   - The **recorder bar** works as usual (Pause, Discard, Done). If its usual place at the bottom of the screen is inside your area, it moves just above or below the area instead.
+   - The bar's **Area** button lets you choose a new area. Capturing pauses while you choose, and **Esc** keeps the old area.
+   - Clicks outside the area are ignored. Typing counts when the field is inside the area. Every screenshot is cropped to the area.
+5. Click **Done**. The guide remembers its area, and your next area capture starts from the same rectangle.
+
+**Specific apps** records only the apps you tick:
+
+- Tick the apps in the list. Apps you chose before stay listed even when they're closed. **Taskbar & Start menu** is at the bottom if you want those clicks too.
+- Each screenshot is cropped to the app's window. A menu or dialog that's smaller than the app keeps its window around it for context.
+- Click in an app you didn't tick and the bar asks **"*App* isn't being captured"**. **Add** includes that app from then on, and also keeps the click you just made. **✕** stops asking about that app for this capture.
+- The bar's app button (it shows the app's name, or "*N* apps") opens the list so you can change the apps while capturing.
 
 ### A3. What the desktop app writes for each action
 
@@ -201,14 +225,14 @@ Element names come from the operating system's accessibility features: UI Automa
 ### A4. Privacy while recording
 
 - **Passwords:** password fields are detected and their contents are never saved.
-- **The recorder bar** never appears in screenshots on Windows. On Linux it is blurred automatically.
+- **The recorder bar** never appears in FlowDoc's screenshots. On Windows it is hidden from all screen captures by default; if you make it visible to other apps ([A7](#a7-capture-settings)), or on Linux, FlowDoc blurs it out of each step's screenshot instead (you can remove the blur in the screenshot editor).
 - **Clicks inside FlowDoc's own windows** are ignored.
 - **Screenshots:** if one shows something private, blur it afterwards with the screenshot editor ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
 - **Typed text:** to keep it out of guides entirely, untick **Settings → Capture → Include typed text in steps**.
 
 ### A5. Optional: AI write-ups with Gemini or Groq
 
-The AI assistant turns recorded steps into polished instructions by looking at each step's screenshot. For example, "Click in **File Explorer**" becomes "Click **New folder** in the toolbar". It also writes a "How to…" title and a short description for the guide. It's optional and off by default, and it uses **your own API key**.
+The AI assistant turns recorded steps into polished instructions by looking at each step's screenshot. For example, "Click in **File Explorer**" becomes "Click **New folder** in the toolbar". It also writes a "How to…" title and a short description for the guide, and it can **translate** a guide into Tamil, Hindi and many other languages ([C10](#c10-translate-a-guide)). It's optional and off by default, and it uses **your own API key**. The browser extension has it too ([B5](#b5-optional-ai-improve-and-translate-in-the-extension)).
 
 **Step 1: Get an API key (free tiers are available).**
 
@@ -308,6 +332,7 @@ Open **Settings → Capture**:
 | Setting | What it does |
 | --- | --- |
 | Minimise FlowDoc while capturing | Gets FlowDoc out of the way when a capture starts (on by default). |
+| Hide the recorder bar from screen recordings and meetings | On by default: screen recorders and meeting apps (Teams, Zoom, Meet, OBS…) don't see the bar or the red area border. Untick it when you are recording a video or sharing your screen and want viewers to see the bar too. Either way, clicks on the bar are never steps, and FlowDoc blurs the bar out of its own screenshots. Linux can't hide windows from captures, so there the bar is always visible to other apps and the box is greyed out. |
 | Include typed text in steps | Shows what you typed, for example Type "Q3 report"… Passwords are always hidden. |
 | Also include keystrokes when the field type can't be detected | For apps that don't report their text fields. Off by default, because FlowDoc can't tell whether such a field holds a password. |
 
@@ -362,6 +387,7 @@ Your settings, API keys and Notion secret always stay in the app's data folder; 
 | Notion: page list is empty, or "404 / object not found" | The page isn't shared with your integration. In Notion: open the page → **•••** → **Connections** → add **FlowDoc**, then click **Refresh**. |
 | Notion: a subpage is missing | It appears when you open its parent page. Pages inside databases aren't listed: FlowDoc saves under pages, not database rows. |
 | Notion: a database doesn't appear in the picker | FlowDoc saves guides as pages under other pages. Database rows aren't offered as destinations. |
+| **An area:** after **Start capture** the area went blank and the recorder bar was missing | Fixed in this version. The border around the area was drawn as one window cut to a frame shape, and Windows sometimes ignored the shape, so a blank window covered the area and could hide the bar. The border is now four thin strips outside the area, and the bar is kept on top and off the area. If anything ever gets stuck, press **`Alt+Shift+R`** to stop the capture. |
 | Recorder bar buttons don't respond | Fixed in this version (the buttons used to sit inside the bar's drag area, which swallows clicks on Windows). Update and restart FlowDoc. |
 | `npm run dist:win` fails with **EBUSY / resource busy** | Handled automatically. The build runs in a temporary folder and only the finished installers are copied into `dist/`, because programs that watch the project folder (editors, antivirus, the Claude desktop app) can briefly lock files mid-build. If it still fails, close those programs and retry. |
 | `npm run dist:win` fails with **copyfile … elevate.exe: UNKNOWN** | Handled automatically. This happens when your `AppData` folder has the Windows "Encrypted" (EFS) attribute: electron-builder's cached tools inherit it, and Windows Home can't copy encrypted files. The build script now keeps that cache in the temp folder instead. |
@@ -429,27 +455,37 @@ Each step gets a screenshot. The element you clicked is outlined and the click p
 - Click **My guides ↗** in the popup to open the full library.
 - Guides are stored inside the browser profile, in the extension's storage. To move them to another computer, export a **Backup (.json)** and import it there (see [C8](#c8-manage-your-library)).
 
-### B5. Change the keyboard shortcut
+### B5. Optional: AI (Improve and Translate) in the extension
+
+The extension has the same **✨ Improve with AI** and **Translate** as the desktop app, with your own Gemini or Groq key.
+
+1. Open the workspace (**My guides ↗** in the popup) and click **Settings** at the bottom of the left sidebar.
+2. Under **AI assistant**, choose **Google Gemini** or **Groq**, paste your key and click **Save key**. [A5](#a5-optional-ai-write-ups-with-gemini-or-groq) explains how to get a key and which model to pick.
+3. Click **Test connection**, then **Done**. **Improve with AI** appears in the guide toolbar, and **Translate** becomes active.
+
+**Where the key is kept:** in this browser profile's extension storage. It isn't encrypted the way the desktop app encrypts it, so anyone who can use this browser profile could read it. **Remove key** in Settings deletes it. Requests go straight from the workspace page to the provider you chose.
+
+### B6. Change the keyboard shortcut
 
 Open `chrome://extensions/shortcuts` (or `edge://extensions/shortcuts`). Find **FlowDoc → Start or stop capturing** and set the key combination you want.
 
-### B6. Update the extension after pulling new code
+### B7. Update the extension after pulling new code
 
 1. Run `git pull` and then `npm install` in the `FlowDoc` folder.
 2. Open `chrome://extensions` and click the **reload** (circular arrow) icon on the FlowDoc card.
 3. Reload any tabs you want to record.
 
-### B7. Troubleshooting (extension)
+### B8. Troubleshooting (extension)
 
 | Problem | Fix |
 | --- | --- |
 | **Start capture** is greyed out | You're on a browser-internal page (`chrome://`, the Web Store, the new-tab page). Open a normal website. |
 | Clicks on a page aren't recorded | Reload the page (F5) once after installing or updating the extension. Clicks inside embedded frames (iframes) aren't supported. |
 | A step has no screenshot | The tab wasn't visible at that moment (for example, you switched tabs very quickly). Use **More → Replace screenshot** on that step, or record it again. |
-| The shortcut does nothing | Another extension may use `Alt+Shift+R`. Change it as described in [B5](#b5-change-the-keyboard-shortcut). |
+| The shortcut does nothing | Another extension may use `Alt+Shift+R`. Change it as described in [B6](#b6-change-the-keyboard-shortcut). |
 | "Load unpacked" shows an error about missing files | Run `npm install` first, so that `extension/vendor/` exists. |
 
-### B8. Uninstall
+### B9. Uninstall
 
 Open `chrome://extensions` and click **Remove** on the FlowDoc card. This also deletes the guides stored in the extension, so export backups first if you want to keep them.
 
@@ -531,7 +567,9 @@ Click highlights (the marks showing what was clicked):
 
 Other ways to share:
 
-- **Print:** opens a print-ready version. Choose **Save as PDF** as the printer to get a PDF that also handles non-Latin scripts, such as Hindi or Tamil, perfectly.
+- **Print:** opens a print-ready version. Choose **Save as PDF** as the printer to get a PDF with selectable text in any script.
+
+**Other languages in PDF:** the built-in PDF export writes Latin text as real, selectable text. When a guide is in another script (Tamil, Hindi, Arabic, Chinese…), FlowDoc draws that text with your system's fonts and places it in the PDF as sharp images, so it always shows correctly but can't be selected or searched. For selectable text in those scripts, use **Print → Save as PDF**. On Linux, install Noto fonts (for example `fonts-noto-core`) so every script has a font.
 - **Copy text:** copies the numbered steps as plain text, ready to paste into chat or email.
 
 ### C6. Try it without recording
@@ -566,6 +604,39 @@ Open a guide and click **● Continue capturing** in the toolbar to record more 
 - **Discard** removes only the steps from this session. The guide itself is kept.
 - If **Improve with AI** is still running on the guide, wait for it to finish or stop it first.
 - Undo history is cleared when the capture ends, so **Undo** can't remove the new steps by accident.
+
+### C10. Translate a guide
+
+**Translate** in the guide toolbar makes a translated **copy** of the guide. The original stays exactly as it is, so you can keep one guide per language. It works in the desktop app and in the extension.
+
+**It needs AI.** Until a Gemini or Groq key is set up, the button is greyed out. Clicking it explains what's needed and opens the AI settings ([A5](#a5-optional-ai-write-ups-with-gemini-or-groq) for the desktop app, [B5](#b5-optional-ai-improve-and-translate-in-the-extension) for the extension).
+
+1. Open the guide and click **Translate**.
+2. Choose the **language**. Each is shown in its own script first, then in English, so everyone can find theirs:
+   - **Indian languages:** தமிழ் (Tamil), हिन्दी (Hindi), বাংলা (Bengali), తెలుగు (Telugu), मराठी (Marathi), ગુજરાતી (Gujarati), ಕನ್ನಡ (Kannada), മലയാളം (Malayalam), ਪੰਜਾਬੀ (Punjabi), ଓଡ଼ିଆ (Odia), اردو (Urdu), অসমীয়া (Assamese).
+   - **Other languages:** English, Español (Spanish), Français (French), Deutsch (German), Português (Portuguese), العربية (Arabic), 中文 (Chinese, Simplified), 日本語 (Japanese), 한국어 (Korean), Русский (Russian), Bahasa Indonesia, Italiano (Italian), Türkçe (Turkish), Tiếng Việt (Vietnamese).
+   - **Other…:** type any language name, such as Sanskrit or Nepali.
+3. Tick **what to translate**: title and description, section headings, step instructions, and notes/tips/text blocks. The numbers show how many of each the guide has. Everything is ticked by default.
+4. Choose what happens to **on-screen names in bold**, such as **Save**:
+   - **Keep as on screen** (recommended): they stay as they appear in the screenshots, so readers can find the button. "Click **Save**" stays **Save** in the translated sentence.
+   - **Translate, original in brackets:** for example **சேமி** (Save).
+   - **Translate them:** only if people use the app itself in that language.
+5. Click **Translate**. The copy opens straight away, titled with the language, for example "How to file an expense (தமிழ்)". A progress strip shows how far it is, and you can keep working or open other guides. **Stop** cancels it and removes the half-made copy.
+6. When it's done, the copy fills in. Press **Ctrl+Z** to undo it if needed.
+
+**Good to know:**
+
+- Only the text is sent, never the screenshots, so it's quick.
+- The screenshots stay in the original language.
+- Typed values (anything in "quotes"), links, email addresses, file names and keyboard shortcuts are never translated. If the AI changes a typed value anyway, that piece is kept in the original language, and FlowDoc tells you how many pieces that happened to.
+- Your last choices (language, parts, on-screen names) are remembered.
+- Exports carry the language: HTML pages are tagged with it, Urdu and Arabic read right to left, and PDF shows every script (see [C5](#c5-export)).
+
+### C11. More room for the guide (hide the side panels)
+
+Click the **panel button** next to the FlowDoc logo at the top of the left sidebar, or press **`Ctrl+\`**. The left sidebar and the **Contents** list on the right both hide, and the guide uses the full width of the window.
+
+To bring them back, click the same kind of button at the top-left corner of the window, or press **`Ctrl+\`** again. FlowDoc remembers your choice the next time you open it.
 
 ---
 
@@ -659,7 +730,8 @@ scripts/               vendor copy, icon render, static server, tests
 - **Extension**
   - Not yet tested by hand in Google Chrome; only an automated test in Microsoft Edge has run.
   - Clicks inside iframes and on browser-internal pages (`chrome://`, the Web Store) aren't recorded.
-  - The built-in PDF export only supports Latin text. Use **Print → Save as PDF** for other scripts.
+  - The built-in PDF export shows non-Latin scripts (Tamil, Hindi, Arabic…) as images of the text, so that text can't be selected or searched. **Print → Save as PDF** keeps it selectable.
+  - Your AI key is stored in the browser profile without encryption (the desktop app encrypts it).
 - **Both:** there is no cloud sharing or share links. Share the exported files instead.
 
 ---
