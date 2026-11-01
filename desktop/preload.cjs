@@ -20,7 +20,10 @@ contextBridge.exposeInMainWorld('flowdocDesktop', {
   },
   onStoreChange: on('kv:changed'),
   recorder: {
+    // opts: { guideId?, scope?: { mode: 'screen' | 'area' | 'apps', area?, apps?: [{ key, name }] } }
     start: (opts) => ipcRenderer.invoke('recorder:start', opts),
+    // Open apps for the app picker: [{ key, name, icon, windows, closed?, shell? }]
+    apps: (keep) => ipcRenderer.invoke('recorder:apps', keep),
     stop: () => ipcRenderer.invoke('recorder:stop'),
     discard: () => ipcRenderer.invoke('recorder:discard'),
     pause: () => ipcRenderer.invoke('recorder:pause'),

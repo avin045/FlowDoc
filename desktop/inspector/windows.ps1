@@ -3,7 +3,8 @@
 # Automation to describe the element under a screen point or the focused element.
 #   {"id":1,"op":"point","x":100,"y":200}   physical screen pixels
 #   {"id":2,"op":"focus"}
-#   {"id":3,"op":"ping"}
+#   {"id":3,"op":"windows"}                  open top-level windows, front to back
+#   {"id":4,"op":"ping"}
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -13,8 +14,70 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Text;
 public static class FlowDocDpi {
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+}
+// Top-level windows: which app shows them, where they are, and who owns them
+// (a dialog run by another process still belongs to the app that opened it).
+public static class FlowDocWin {
+  public class Info { public long Hwnd; public string Title; public string Cls; public int Pid; public int OwnerPid; public bool Minimized; public int X, Y, W, H; }
+  [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
+  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
+
+  static int PidOf(IntPtr h) { uint pid; GetWindowThreadProcessId(h, out pid); return (int)pid; }
+
+  public static Info Describe(IntPtr h) {
+    var title = new StringBuilder(512); GetWindowText(h, title, 512);
+    var cls = new StringBuilder(256); GetClassName(h, cls, 256);
+    var i = new Info { Hwnd = h.ToInt64(), Title = title.ToString(), Cls = cls.ToString(), Pid = PidOf(h), Minimized = IsIconic(h) };
+    // Store apps (Settings, Calculator...) run inside an ApplicationFrameHost frame.
+    if (i.Cls == "ApplicationFrameWindow") {
+      var core = FindWindowEx(h, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null);
+      if (core != IntPtr.Zero) i.Pid = PidOf(core);
+    }
+    var owner = GetWindow(h, 4); // GW_OWNER
+    if (owner != IntPtr.Zero) i.OwnerPid = PidOf(owner);
+    RECT r;
+    // The visible frame, without the invisible resize borders.
+    if (DwmGetWindowAttribute(h, 9, out r, Marshal.SizeOf(typeof(RECT))) != 0) GetWindowRect(h, out r);
+    i.X = r.L; i.Y = r.T; i.W = r.R - r.L; i.H = r.B - r.T;
+    return i;
+  }
+
+  public static Info Top(long hwnd) {
+    var h = new IntPtr(hwnd);
+    var root = GetAncestor(h, 2); // GA_ROOT
+    return Describe(root == IntPtr.Zero ? h : root);
+  }
+
+  public static List<Info> List() {
+    var list = new List<Info>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      int cloaked; // suspended Store apps, windows on other virtual desktops
+      if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
+      if ((GetWindowLong(h, -20) & 0x80) != 0) return true; // WS_EX_TOOLWINDOW
+      var i = Describe(h);
+      if (i.Title.Length > 0 && i.W > 0 && i.H > 0) list.Add(i);
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
 }
 "@
 # Per-monitor v2 awareness so coordinates match the (physical) mouse hook.
@@ -33,8 +96,9 @@ function Get-AppName([int]$procId) {
     try { $name = $p.MainModule.FileVersionInfo.FileDescription } catch {}
     if (-not $name) { $name = $p.ProcessName }
     $exe = $p.ProcessName
+    try { $path = $p.Path } catch {}
   } catch {}
-  $result = @{ name = $name; exe = $exe }
+  $result = @{ name = $name; exe = $exe; path = $path }
   $appNames[$procId] = $result
   return $result
 }
@@ -90,17 +154,49 @@ function Describe($el) {
     }
   }
 
-  # Top-level window title.
-  $w = $el; $depth = 0; $lastWindow = $null
+  # Top-level window title, and the top-level element (the one just below the
+  # desktop) for its native window handle.
+  $w = $el; $depth = 0; $lastWindow = $null; $prev = $null; $topEl = $el
   while ($null -ne $w -and $depth -lt 40) {
     if ($w.Current.ControlType -eq $CT::Window) { $lastWindow = $w.Current.Name }
+    if ($null -ne $prev) { $topEl = $prev }
+    $prev = $w
     $w = $walker.GetParent($w); $depth++
   }
+  $hwnd = 0
+  try { $hwnd = $topEl.Current.NativeWindowHandle } catch {}
   $o.window = $lastWindow
   $app = Get-AppName $c.ProcessId
   $o.app = $app.name
   $o.exe = $app.exe
+  # The app showing the top-level window (so a menu or file dialog counts as
+  # part of the app that opened it), its class and where it is.
+  if ($hwnd) {
+    try {
+      $top = [FlowDocWin]::Top([long]$hwnd)
+      $topApp = Get-AppName $top.Pid
+      $o.topExe = $topApp.exe
+      $o.topApp = $topApp.name
+      $o.topClass = $top.Cls
+      $o.topRect = @{ x = $top.X; y = $top.Y; w = $top.W; h = $top.H }
+      if ($top.OwnerPid) { $o.ownerExe = (Get-AppName $top.OwnerPid).exe }
+    } catch {}
+  }
   return $o
+}
+
+function List-Windows {
+  $out = @()
+  foreach ($i in [FlowDocWin]::List()) {
+    $app = Get-AppName $i.Pid
+    $o = [ordered]@{
+      title = $i.Title; cls = $i.Cls; pid = $i.Pid; exe = $app.exe; app = $app.name; path = $app.path
+      minimized = $i.Minimized; rect = @{ x = $i.X; y = $i.Y; w = $i.W; h = $i.H }
+    }
+    if ($i.OwnerPid) { $o.ownerExe = (Get-AppName $i.OwnerPid).exe }
+    $out += $o
+  }
+  return ,$out
 }
 
 while ($true) {
@@ -114,6 +210,7 @@ while ($true) {
     switch ($req.op) {
       'point' { $res.el = Describe ($AE::FromPoint((New-Object System.Windows.Point([double]$req.x, [double]$req.y)))) }
       'focus' { $res.el = Describe ($AE::FocusedElement) }
+      'windows' { $res.el = List-Windows }
       'ping'  { $res.ok = $true }
       default { $res.error = "unknown op $($req.op)" }
     }

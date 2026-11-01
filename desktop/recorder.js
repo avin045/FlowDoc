@@ -2,12 +2,14 @@
 // click and key press in any application; each one is turned into a guide
 // step with a screenshot (capture.js) and a description of the element that
 // was acted on (inspector/). Steps are written to the same guide format the
-// workspace and exporters already use.
+// workspace and exporters already use. A capture can be limited to one area
+// of the screen or to some apps (scope.js); anything outside is not a step.
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { screen } from 'electron';
 import uiohookPkg from 'uiohook-napi';
 import { createGuide, deleteGuide, getGuide, saveGuide } from '../extension/shared/guides.js';
+import { appAllowed, appKey, appName, cleanScope, cropOf, pointInArea, SHELL } from './scope.js';
 
 const { uIOhook, UiohookKey } = uiohookPkg;
 const K = UiohookKey;
@@ -109,6 +111,13 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   // "Continue capturing": the ids of the steps the guide already had. They are
   // never rewritten, and Discard removes only the steps added after them.
   let keepIds = null;
+  let scope = { mode: 'screen' };
+  let lastInArea = false; // where the last click landed, for keys with no field rectangle
+  // Apps mode: the last click in an app that isn't chosen. If the user adds
+  // that app straight away, the click becomes a step after all.
+  let stray = null; // { key, name, step, at }
+  const muted = new Set(); // apps the user said not to ask about again
+  const appRects = new Map(); // app key -> its main window (DIP), to crop popups in context
 
   const win = process.platform === 'win32';
   const toDip = (p) => (win ? screen.screenToDipPoint(p) : p);
@@ -123,6 +132,62 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     return run;
   }
 
+  // ---------- scope ----------
+
+  function areaDisplay() {
+    const a = scope.area;
+    return screen.getAllDisplays().find((d) => d.id === a.displayId) || displayAt({ x: a.x + a.width / 2, y: a.y + a.height / 2 });
+  }
+  // The display a screenshot is taken of: the area's, or the one at `point`.
+  const shotDisplay = (point) => (scope.mode === 'area' ? areaDisplay() : displayAt(point));
+
+  // Whether a field or focused element (typing, key presses) is in scope.
+  function inScope(el) {
+    if (scope.mode === 'apps') return appAllowed(scope, el);
+    if (scope.mode !== 'area') return true;
+    const r = el?.rect && rectToDip(el.rect);
+    if (!r || !(r.width > 0)) return lastInArea;
+    const a = scope.area;
+    return r.x < a.x + a.width && r.x + r.width > a.x && r.y < a.y + a.height && r.y + r.height > a.y;
+  }
+
+  // Area mode crops every shot to the area. Apps mode crops to the app's
+  // window; a menu or dialog smaller than the app's last window is shown
+  // together with that window, so it keeps its context.
+  function cropFor(display, el) {
+    if (scope.mode === 'area') return cropOf(scope.area, display);
+    if (scope.mode !== 'apps' || !(el?.topRect?.w > 0)) return null;
+    const r = rectToDip(el.topRect);
+    const key = appKey(el);
+    const main = appRects.get(key);
+    if (main && r.width * r.height < main.width * main.height * 0.5) {
+      const x = Math.min(r.x, main.x);
+      const y = Math.min(r.y, main.y);
+      return cropOf({ x, y, width: Math.max(r.x + r.width, main.x + main.width) - x, height: Math.max(r.y + r.height, main.y + main.height) - y }, display);
+    }
+    appRects.set(key, r);
+    return cropOf(r, display);
+  }
+
+  function noteStray(el, step) {
+    const key = appKey(el);
+    if (!key || key === SHELL || muted.has(key)) return;
+    stray = { key, name: appName(el) || key, step, at: Date.now() };
+    events.emit('stray', { key, name: stray.name });
+  }
+
+  function saveScope() {
+    const id = state.guideId;
+    state.scope = cleanScope(scope);
+    emitState();
+    return enqueue(async () => {
+      const guide = await getGuide(id);
+      if (!guide) return;
+      guide.captureScope = cleanScope(scope);
+      await saveGuide(guide);
+    });
+  }
+
   // Builds a step relative to the display it happened on.
   function buildStep({ frame, display, point, el, rect, action, text, extra = {} }) {
     const db = display.bounds;
@@ -133,7 +198,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       text,
       highlight: true,
       redactions: [],
-      crop: null,
+      crop: cropFor(display, el),
       createdAt: Date.now(),
       app: clean(el?.app, 80),
       window: clean(el?.window, 120),
@@ -165,6 +230,18 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       if (at >= 0) guide.steps[at] = { ...guide.steps[at], ...step, id: replaceId };
       else guide.steps.push(step);
     }
+    await saveGuide(guide);
+    state.stepCount = guide.steps.filter((s) => s.kind === 'action').length;
+    emitState();
+  }
+
+  // A step that happened a moment ago, placed among this session's steps by time.
+  async function insertStep(step) {
+    const guide = await getGuide(state.guideId);
+    if (!guide) return;
+    let at = guide.steps.length;
+    while (at > 0 && guide.steps[at - 1].createdAt > step.createdAt && !keepIds?.has(guide.steps[at - 1].id)) at--;
+    guide.steps.splice(at, 0, step);
     await saveGuide(guide);
     state.stepCount = guide.steps.filter((s) => s.kind === 'action').length;
     emitState();
@@ -222,12 +299,13 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     clearTimeout(d.idle);
     if (!d.chars) return;
     const cursor = screen.getCursorScreenPoint();
-    framePromise ||= capture.grab(displayAt(cursor));
+    framePromise ||= capture.grab(shotDisplay(cursor));
     enqueue(async () => {
       await Promise.race([d.fieldPromise, new Promise((r) => setTimeout(r, 800))]);
       const fresh = d.snapshot && d.snapAt >= d.lastKeyAt;
       const field = (fresh ? d.snapshot : d.field) || d.snapshot || null;
       if (isOwnElement(field, d.point)) return; // typing in FlowDoc's own UI
+      if (!inScope(field)) return;
       const known = !!field && ['edit', 'document', 'combobox'].includes(String(field.type).toLowerCase());
       let value = null;
       if (!field?.isPassword && captureSettings.typedText !== false) {
@@ -236,7 +314,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       }
       const text = describeTyping(field, value);
       const frame = await framePromise;
-      const display = field?.rect ? displayAt(toDip({ x: field.rect.x + field.rect.w / 2, y: field.rect.y + field.rect.h / 2 })) : displayAt(cursor);
+      const display =
+        scope.mode === 'area' ? areaDisplay() : field?.rect ? displayAt(toDip({ x: field.rect.x + field.rect.w / 2, y: field.rect.y + field.rect.h / 2 })) : displayAt(cursor);
       const step = buildStep({ frame, display, el: field, action: 'type', text, extra: { value: field?.isPassword ? '' : value || '', secret: !!field?.isPassword } });
 
       // Continuing to type in the same field refines the previous step.
@@ -259,6 +338,13 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     const button = e.button; // 1 left, 2 right, 3 middle
     if (button !== 1 && button !== 2) return;
     const clicks = e.clicks || 1;
+    if (scope.mode === 'area') {
+      lastInArea = pointInArea(scope.area, point);
+      if (!lastInArea) {
+        if (draft) flushDraft(); // clicking elsewhere ends the typing run
+        return;
+      }
+    }
 
     // Second press of a double-click: relabel the step just captured.
     if (button === 1 && clicks >= 2 && lastClick && Date.now() - lastClick.at < 800 && Math.hypot(point.x - lastClick.x, point.y - lastClick.y) < 8) {
@@ -282,18 +368,20 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       if (isOwnElement(el, point)) return; // a click on FlowDoc itself
       const step = buildStep({ frame, display, point, el, action: button === 2 ? 'rightclick' : 'click', text: describeClick(el, { button, clicks: 1 }) });
       step.id = stepId;
+      if (!appAllowed(scope, el)) return noteStray(el, step);
       await appendSteps([step]);
     });
   }
 
   function pressStep(label, e) {
     const cursor = screen.getCursorScreenPoint();
-    const display = displayAt(cursor);
+    const display = shotDisplay(cursor);
     const framePromise = capture.grab(display);
     const elPromise = inspector.focused();
     if (draft) flushDraft(framePromise);
     enqueue(async () => {
       const [frame, el] = await Promise.all([framePromise, elPromise]);
+      if (!inScope(el)) return;
       await appendSteps([buildStep({ frame, display, el, action: 'key', text: `Press ${b(label)}`, extra: { key: label } })]);
     });
   }
@@ -349,11 +437,15 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   // ---------- session control ----------
 
   // `guideId` continues an existing guide: new steps go after its last one.
-  async function start({ title = '', guideId } = {}) {
+  // `scope` limits what is recorded (see scope.js); the guide remembers it.
+  async function start({ title = '', guideId, scope: wanted } = {}) {
     if (state.active) return { ...state };
     captureSettings = (await settings.get()).capture;
     let guide = guideId ? await getGuide(guideId) : null;
     if (guideId && !guide) throw new Error('That guide no longer exists.');
+    scope = cleanScope(wanted);
+    if (scope.mode === 'area' && !(scope.area?.width > 0)) throw new Error('Choose the area to capture first.');
+    if (scope.mode === 'apps' && !scope.apps.length) throw new Error('Choose at least one app to capture.');
     if (guide) {
       keepIds = new Set(guide.steps.map((s) => s.id));
       guide.recording = true;
@@ -361,10 +453,15 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       keepIds = null;
       guide = createGuide({ title, recording: true, source: { app: 'Desktop', platform: process.platform } });
     }
+    guide.captureScope = cleanScope(scope);
     await saveGuide(guide);
     await Promise.all([capture.start(), inspector.warmUp()]);
     const stepCount = guide.steps.filter((s) => s.kind === 'action').length;
-    state = { active: true, paused: false, guideId: guide.id, stepCount, startedAt: Date.now(), continuing: !!keepIds };
+    stray = null;
+    muted.clear();
+    appRects.clear();
+    lastInArea = false;
+    state = { active: true, paused: false, guideId: guide.id, stepCount, startedAt: Date.now(), continuing: !!keepIds, scope: cleanScope(scope) };
     if (!hookRunning && !process.env.FLOWDOC_NO_HOOK) {
       uIOhook.start();
       hookRunning = true;
@@ -434,12 +531,57 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     return { ...state };
   }
 
+  // ---------- changing the scope while capturing ----------
+
+  // Apps mode: the chosen apps, replaced as a whole.
+  async function setApps(apps) {
+    if (!state.active || scope.mode !== 'apps') return { ...state };
+    const next = cleanScope({ mode: 'apps', apps }).apps;
+    if (!next.length) throw new Error('Keep at least one app.');
+    scope.apps = next;
+    await saveScope();
+    return { ...state };
+  }
+
+  // Apps mode: adds one app. If the user just clicked in it, that click is kept.
+  async function includeApp({ key, name } = {}) {
+    if (!state.active || scope.mode !== 'apps' || !key) return { ...state };
+    if (!scope.apps.some((a) => a.key === key)) scope.apps.push({ key, name: name || key });
+    muted.delete(key);
+    const s = stray?.key === key && Date.now() - stray.at < 60000 ? stray : null;
+    if (stray?.key === key) stray = null;
+    await saveScope();
+    if (s) await enqueue(() => insertStep(s.step));
+    return { ...state };
+  }
+
+  // Apps mode: stop asking about an app for the rest of this capture.
+  function dismissStray(key) {
+    if (key) muted.add(key);
+    if (stray?.key === key) stray = null;
+  }
+
+  async function setArea(area) {
+    if (!state.active || scope.mode !== 'area') return { ...state };
+    const next = cleanScope({ mode: 'area', area }).area;
+    if (!(next?.width > 0)) return { ...state };
+    if (draft) flushDraft();
+    scope.area = next;
+    lastInArea = false;
+    await saveScope();
+    return { ...state };
+  }
+
   return {
     events,
     start,
     stop,
     discard,
     setPaused,
+    setApps,
+    includeApp,
+    dismissStray,
+    setArea,
     get state() {
       return { ...state };
     },

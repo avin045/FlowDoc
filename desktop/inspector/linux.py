@@ -101,10 +101,47 @@ def describe(acc):
     while node is not None and depth < 60:
         if safe(node.get_role_name, "") in WINDOW_ROLES:
             out["window"] = safe(node.get_name, "")
+            out["topRect"] = rect_of(node)
             break
         node, depth = safe(node.get_parent), depth + 1
     app = safe(acc.get_application)
     out["app"] = safe(app.get_name, "") if app else ""
+    out["exe"] = exe_of(out["pid"])
+    return out
+
+
+def exe_of(pid):
+    try:
+        with open("/proc/%d/comm" % int(pid)) as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def list_windows():
+    """Open application windows, the active one first."""
+    out = []
+    for win in windows():
+        if safe(win.get_role_name, "") not in WINDOW_ROLES:
+            continue
+        states = safe(win.get_state_set)
+        has = lambda s: bool(states and safe(lambda: states.contains(s), False))
+        rect = rect_of(win)
+        title = safe(win.get_name, "") or ""
+        if not title or not rect:
+            continue
+        app = safe(win.get_application)
+        pid = safe(win.get_process_id)
+        out.append({
+            "title": title,
+            "pid": pid,
+            "exe": exe_of(pid),
+            "app": safe(app.get_name, "") if app else "",
+            "rect": rect,
+            "minimized": has(Atspi.StateType.ICONIFIED) or not has(Atspi.StateType.SHOWING),
+            "active": has(Atspi.StateType.ACTIVE),
+        })
+    out.sort(key=lambda w: 0 if w["active"] else 1)
     return out
 
 
@@ -178,6 +215,8 @@ def main():
                 res["el"] = describe(at_point(int(req["x"]), int(req["y"])))
             elif op == "focus":
                 res["el"] = describe(focused())
+            elif op == "windows":
+                res["el"] = list_windows()
             elif op == "ping":
                 res["ok"] = True
             else:

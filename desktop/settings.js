@@ -37,6 +37,8 @@ const DEFAULTS = {
     hideWindow: true, // minimise FlowDoc while capturing
     typedText: true, // include what was typed (passwords are always masked)
     unknownFieldText: false, // include keystrokes when the field type can't be detected
+    // What the last capture recorded, offered again next time (see scope.js).
+    lastScope: { mode: 'screen', apps: [], area: null },
   },
   ui: {
     theme: 'system', // 'system' | 'light' | 'dark'

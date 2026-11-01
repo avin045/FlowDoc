@@ -20,10 +20,7 @@ async function act(button, fn) {
   button.disabled = true;
   try {
     const s = await fn();
-    if (s && typeof s.active === 'boolean') {
-      state = s;
-      render();
-    }
+    if (s && typeof s.active === 'boolean') update(s);
   } finally {
     button.disabled = false;
   }
@@ -54,12 +51,143 @@ function disarm() {
   $('discard').title = 'Discard this recording';
 }
 
-recorderBar.onState((s) => {
-  state = s;
-  render();
+// ---------- scope: area / apps ----------
+
+const AREA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>';
+const APPS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>';
+const SCREEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>';
+let scopeKey = '';
+let appList = [];
+
+function renderScope() {
+  const sc = state.scope || { mode: 'screen' };
+  const key = JSON.stringify([state.active, sc]);
+  if (key === scopeKey) return;
+  scopeKey = key;
+  const btn = $('scope');
+  btn.hidden = !state.active || !['area', 'apps'].includes(sc.mode);
+  if (sc.mode === 'area') {
+    btn.innerHTML = `${AREA}Area`;
+    btn.title = 'Choose a different area';
+  } else if (sc.mode === 'apps') {
+    const n = sc.apps?.length || 0;
+    btn.innerHTML = APPS;
+    btn.append(n === 1 ? sc.apps[0].name : `${n} apps`);
+    btn.title = 'Choose which apps are captured';
+  }
+  if (sc.mode !== 'apps') $('panel').hidden = true;
+  else if (!$('panel').hidden) renderPanel();
+}
+
+function renderPanel() {
+  const chosen = new Set((state.scope?.apps || []).map((a) => a.key));
+  const list = $('appList');
+  list.textContent = '';
+  for (const a of appList) {
+    const row = document.createElement('label');
+    row.className = 'app';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = chosen.has(a.key);
+    box.addEventListener('change', () => toggleApp(a, box));
+    let icon;
+    if (a.shell) {
+      icon = document.createElement('span');
+      icon.className = 'avatar';
+      icon.innerHTML = SCREEN;
+    } else if (a.icon) {
+      icon = document.createElement('img');
+      icon.src = a.icon;
+      icon.alt = '';
+    } else {
+      icon = document.createElement('span');
+      icon.className = 'avatar';
+      icon.textContent = (a.name || '?').slice(0, 1).toUpperCase();
+    }
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = a.name;
+    if (a.closed) {
+      const note = document.createElement('small');
+      note.textContent = ' · not open';
+      name.append(note);
+    }
+    row.append(box, icon, name);
+    list.append(row);
+  }
+}
+
+async function toggleApp(a, box) {
+  const current = state.scope?.apps || [];
+  const next = box.checked ? [...current, { key: a.key, name: a.name }] : current.filter((x) => x.key !== a.key);
+  $('panelError').hidden = true;
+  try {
+    const s = await recorderBar.setApps(next);
+    if (s && typeof s.active === 'boolean') state = s;
+  } catch (err) {
+    box.checked = !box.checked;
+    $('panelError').textContent = String(err.message || err).replace(/^.*Error: /, '');
+    $('panelError').hidden = false;
+  }
+  renderScope();
+}
+
+async function openPanel() {
+  appList = await recorderBar.apps(state.scope?.apps || []);
+  $('panelError').hidden = true;
+  $('panel').hidden = false;
+  renderPanel();
+}
+
+$('scope').addEventListener('click', (e) => {
+  const mode = state.scope?.mode;
+  if (mode === 'area') return act(e.currentTarget, () => recorderBar.reselectArea());
+  if (mode !== 'apps') return;
+  if (!$('panel').hidden) $('panel').hidden = true;
+  else act(e.currentTarget, openPanel);
 });
-recorderBar.state().then((s) => {
-  state = s;
-  render();
+$('panelClose').addEventListener('click', () => ($('panel').hidden = true));
+
+// A click in an app that isn't chosen: offer to add it (the click is kept).
+let strayApp = null;
+let strayTimer = 0;
+function hideNotice() {
+  clearTimeout(strayTimer);
+  strayApp = null;
+  $('notice').hidden = true;
+}
+recorderBar.onStray((app) => {
+  strayApp = app;
+  $('noticeText').textContent = `${app.name} isn't being captured`;
+  $('notice').hidden = false;
+  clearTimeout(strayTimer);
+  strayTimer = setTimeout(hideNotice, 8000);
 });
+$('noticeAdd').addEventListener('click', (e) => {
+  const app = strayApp;
+  hideNotice();
+  if (app) act(e.currentTarget, () => recorderBar.includeApp(app));
+});
+$('noticeDismiss').addEventListener('click', () => {
+  if (strayApp) recorderBar.dismissStray(strayApp.key);
+  hideNotice();
+});
+
+// The window follows the size of what it shows.
+new ResizeObserver(() => {
+  const r = $('wrap').getBoundingClientRect();
+  recorderBar.fit({ width: r.width, height: r.height });
+}).observe($('wrap'));
+
+function update(s) {
+  state = s;
+  if (!s.active) {
+    $('panel').hidden = true;
+    hideNotice();
+  }
+  render();
+  renderScope();
+}
+recorderBar.onState(update);
+recorderBar.state().then(update);
 setInterval(render, 1000);

@@ -8,9 +8,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setKv } from '../extension/shared/guides.js';
 import { complete, listModels } from './ai.js';
 import { listChildPages, listPages, pathTo, saveGuide as saveToNotion, whoAmI } from './notion.js';
+import { createAreaFrame, createAreaPicker } from './area.js';
 import { createCapture } from './capture.js';
 import { createInspector } from './inspector/index.js';
 import { createRecorder } from './recorder.js';
+import { groupApps } from './scope.js';
 import { createSettings } from './settings.js';
 import { createFileStore, ensureWritable, folderUsable, inspectFolder, mergeLibrary } from './store.js';
 
@@ -112,6 +114,43 @@ const recorder = createRecorder({
   log,
 });
 
+// Other apps' open windows, front to back, in DIP screen coordinates.
+async function otherWindows() {
+  const own = new Set(app.getAppMetrics().map((m) => m.pid));
+  const list = (await inspector.windows()).filter((w) => !own.has(w.pid) && w.rect?.w > 0);
+  return { own, list };
+}
+const areaPicker = createAreaPicker({
+  dir: here,
+  listWindows: async () =>
+    (await otherWindows()).list
+      .filter((w) => !w.minimized)
+      .map((w) => {
+        const r = { x: w.rect.x, y: w.rect.y, width: w.rect.w, height: w.rect.h };
+        return { ...(process.platform === 'win32' ? screen.screenToDipRect(null, r) : r), title: w.title };
+      }),
+  log,
+});
+const areaFrame = createAreaFrame();
+
+// Apps for the "Specific apps" picker, with icons. `keep` lists chosen apps
+// that should stay listed even if they're closed right now.
+const iconCache = new Map();
+async function listApps(keep = []) {
+  const { own, list } = await otherWindows();
+  const apps = groupApps(list, { ownPids: own, keep });
+  await Promise.all(
+    apps.map(async (a) => {
+      if (!a.path) return;
+      if (!iconCache.has(a.path)) {
+        iconCache.set(a.path, await app.getFileIcon(a.path, { size: 'normal' }).then((img) => (img.isEmpty() ? '' : img.toDataURL()), () => ''));
+      }
+      a.icon = iconCache.get(a.path);
+    }),
+  );
+  return apps.map(({ path, ...a }) => a);
+}
+
 // ---------- windows ----------
 
 function createMainWindow() {
@@ -179,20 +218,62 @@ function broadcast(channel, payload) {
 
 // ---------- recording ----------
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// `opts.scope` limits the capture (scope.js). An area capture first shows the
+// area picker, preselecting `scope.area` if given.
 async function startRecording(opts = {}) {
-  if (recorder.state.active) return recorder.state;
+  if (recorder.state.active || areaPicker.open) return recorder.state;
   const { capture: cap } = await settings.get();
-  if (cap.hideWindow && mainWin && !process.env.FLOWDOC_SELFTEST) mainWin.minimize();
-  const state = await recorder.start(opts);
+  const scope = opts.scope || { mode: 'screen' };
+  const hide = mainWin && !process.env.FLOWDOC_SELFTEST;
+  // The area is chosen over the app being recorded, so FlowDoc steps aside for it.
+  if (hide && (cap.hideWindow || scope.mode === 'area')) mainWin.minimize();
+  if (scope.mode === 'area') {
+    if (hide) await sleep(250); // let the minimise animation finish
+    const area = await areaPicker.pick({ initial: scope.area });
+    if (!area) {
+      if (hide) mainWin.restore();
+      return { ...recorder.state, cancelled: true };
+    }
+    opts = { ...opts, scope: { ...scope, area } };
+  }
+  let state;
+  try {
+    state = await recorder.start(opts);
+  } catch (err) {
+    if (hide) mainWin.restore();
+    throw err;
+  }
   placeWidget();
   widgetWin.showInactive();
+  // Offered again next time. Only the parts this capture used are replaced.
+  settings.update({ capture: { lastScope: state.scope } }).catch(() => {});
   return state;
+}
+
+// Area mode: pick a new area while capturing. The capture pauses meanwhile.
+async function reselectArea() {
+  const s = recorder.state;
+  if (!s.active || s.scope?.mode !== 'area' || areaPicker.open) return s;
+  recorder.setPaused(true);
+  widgetWin?.hide();
+  areaFrame.hide();
+  const area = await areaPicker.pick({ initial: s.scope.area });
+  if (area) await recorder.setArea(area);
+  if (!s.paused) recorder.setPaused(false);
+  if (recorder.state.active) widgetWin?.showInactive();
+  return recorder.state;
 }
 
 recorder.events.on('state', (state) => {
   broadcast('recorder:state', state);
   updateTray(state);
+  if (state.active && state.scope?.mode === 'area' && !areaPicker.open) areaFrame.show(state.scope.area, { paused: state.paused });
+  else areaFrame.hide();
 });
+
+recorder.events.on('stray', (app) => widgetWin?.webContents.send('recorder:stray', app));
 
 recorder.events.on('finished', ({ guideId }) => {
   widgetWin?.hide();
@@ -240,6 +321,20 @@ function registerIpc() {
   ipcMain.handle('recorder:pause', () => recorder.setPaused(true));
   ipcMain.handle('recorder:resume', () => recorder.setPaused(false));
   ipcMain.handle('recorder:state', () => recorder.state);
+  ipcMain.handle('recorder:apps', (_e, keep) => listApps(Array.isArray(keep) ? keep : []));
+  ipcMain.handle('recorder:setApps', (_e, apps) => recorder.setApps(apps));
+  ipcMain.handle('recorder:includeApp', (_e, a) => recorder.includeApp(a));
+  ipcMain.handle('recorder:dismissStray', (_e, key) => recorder.dismissStray(key));
+  ipcMain.handle('recorder:reselectArea', () => reselectArea());
+  // The recorder bar grows for its app list and prompts; keep its bottom centre in place.
+  ipcMain.on('recorder:fit', (_e, size) => {
+    if (!widgetWin || widgetWin.isDestroyed()) return;
+    const b = widgetWin.getBounds();
+    const width = Math.max(240, Math.min(900, Math.ceil(size?.width || 0)));
+    const height = Math.max(48, Math.min(700, Math.ceil(size?.height || 0)));
+    if (width === b.width && height === b.height) return;
+    widgetWin.setBounds({ x: Math.round(b.x + (b.width - width) / 2), y: b.y + b.height - height, width, height });
+  });
 
   ipcMain.handle('settings:get', () => settings.getPublic());
   ipcMain.handle('settings:update', (_e, patch) => settings.update(patch));
@@ -361,7 +456,7 @@ app.whenReady().then(async () => {
 
   if (process.env.FLOWDOC_SELFTEST) {
     const { runSelfTest } = await import('./selftest.js');
-    runSelfTest({ app, mainWin, recorder, startRecording, settings, markCapturable: (w) => capturableWindows.add(w), getWidget: () => widgetWin }).catch((err) => {
+    runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, markCapturable: (w) => capturableWindows.add(w), getWidget: () => widgetWin }).catch((err) => {
       console.error(err);
       app.exit(1);
     });

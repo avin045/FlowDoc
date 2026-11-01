@@ -261,12 +261,38 @@ check(ac.autoSettingKept === false, 'the old "improve automatically" setting is 
 console.log('\nContinue capturing');
 const cc = r.continue || {};
 const ca = cc.after || {};
+check(cc.scopeDialog?.modes?.join() === 'screen,area,apps' && cc.scopeDialog.checked === 'screen', 'it first asks what to record, starting from the last choice', JSON.stringify(cc.scopeDialog));
 check(cc.button && cc.started?.sameGuide && cc.started.continuing, 'the editor button continues the same guide', JSON.stringify(cc.started));
 check(cc.started?.stepCount === ca.beforeActions, 'the recorder counts on from the existing steps', `${cc.started?.stepCount} of ${ca.beforeActions}`);
 check(cc.locked, 'the guide is locked while capturing');
 check(ca.added >= 2 && ca.keptOld && ca.titleKept, 'new steps are added after the old ones; old steps and title kept', `+${ca.added}: ${(ca.newTexts || []).join(' / ')}`);
 check(ca.notRecording && ca.editorUnlocked, 'Done reopens the guide unlocked');
 check(cc.discard?.exists && cc.discard.sameSteps && cc.discard.notRecording, 'Discard removes only the new steps and keeps the guide', JSON.stringify(cc.discard));
+console.log('\nCapture scope');
+const near = (a, b, tol) => !!a && !!b && ['x', 'y', 'w', 'h'].every((k) => Math.abs(a[k] - b[k]) <= tol);
+const sc = r.scope || {};
+const sa = sc.apps || {};
+check(sc.list?.shell?.length === 1 && sc.list.shellLast && sc.list.keptClosed, 'app picker: taskbar entry last, chosen apps kept when closed', JSON.stringify(sc.list));
+check(sa.bar?.shown && sa.bar.text === 'Notepad', 'recorder bar shows the chosen apps', JSON.stringify(sa.bar));
+check(sa.ignored === 0, 'a click in an app that is not chosen is not recorded', `${sa.ignored} steps`);
+check(sa.panel?.shown && sa.panel.rows >= 2 && sa.panel.fits && sa.panel.icons.every(Boolean), "the bar's app list opens and fits its window", JSON.stringify(sa.panel));
+check(!!sa.stray?.key && sa.notice?.shown && sa.notice.text === `${sa.stray.name} isn't being captured`, 'the bar offers to add that app', JSON.stringify(sa.notice));
+check(sa.kept === 1 && sa.barAfter === '2 apps', 'Add keeps the click just made and adds the app', `${sa.kept} steps, bar "${sa.barAfter}"`);
+check(sa.steps?.length === 2 && sa.steps.every((s) => near(s.crop, sa.expectedCrop, 0.02)), "app shots are cropped to the app's window", JSON.stringify(sa.steps?.map((s) => s.crop)));
+check(sa.saved?.mode === 'apps' && sa.saved.apps.length === 2, 'the guide remembers its apps', JSON.stringify(sa.saved));
+const sr = sc.area || {};
+const A = sr.area;
+check(sr.overlays === sr.displays, 'area picker covers every display', `${sr.overlays} of ${sr.displays}`);
+check(sr.started && sr.overlaysClosed && A && Math.abs(A.x - sr.want.x) <= 2 && Math.abs(A.y - sr.want.y) <= 2 && Math.abs(A.width - sr.want.width) <= 2 && Math.abs(A.height - sr.want.height) <= 2 && A.displayId === sr.want.displayId,
+  'drag a rectangle and press Start: capture begins with that area', JSON.stringify({ got: A, want: sr.want, sel: sr.selected }));
+check(sr.frame?.count === 4 && sr.frame.visible && sr.frame.outside && sr.frame.hugs, 'a border marks the area, just outside it', JSON.stringify(sr.frame));
+check(sr.bar?.shown && sr.bar.text === 'Area', 'recorder bar offers to change the area', JSON.stringify(sr.bar));
+const areaTexts = (sr.steps || []).map((s) => s.text);
+check(!areaTexts.some((t) => /Submit/.test(t)), 'clicks outside the area are ignored', areaTexts.join(' / '));
+check(areaTexts.some((t) => /Subject/.test(t) && t.startsWith('Click')) && (sr.steps || []).every((s) => near(s.crop, sr.expectedCrop, 0.004)), 'clicks inside the area are shots cropped to it', JSON.stringify(sr.steps));
+check(areaTexts.some((t) => t.startsWith('Type')), 'typing inside the area is captured', r.checks.demoFocused ? areaTexts.join(' / ') : focusNote);
+check(sr.frameHiddenAfter && sr.saved?.mode === 'area', 'the border goes away when done; the guide remembers the area');
+
 // Later checks work on the guide as it is after "Continue capturing".
 const finalSteps = r.guide.steps.length + (ca.added || 0);
 

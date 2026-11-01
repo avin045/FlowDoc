@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const progress = (msg) => console.log(`[selftest] ${msg}`);
 const within = (promise, ms) => Promise.race([promise, sleep(ms)]);
 
-export async function runSelfTest({ app, mainWin, recorder, startRecording, settings, markCapturable, getWidget }) {
+export async function runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, markCapturable, getWidget }) {
   const out = process.env.FLOWDOC_TEST_OUT;
   mkdirSync(out, { recursive: true });
   const results = { checks: {}, notes: [] };
@@ -218,6 +218,18 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   const before = await getGuide(guideId);
   results.continue = { button: await mainJs(`!!document.querySelector('[data-act="continue"]')`) };
   await mainJs(`document.querySelector('[data-act="continue"]').click()`);
+  // It asks what to record first; the last capture recorded the whole screen.
+  for (let i = 0; i < 30 && !(await mainJs(`!!document.querySelector('dialog [data-start]')`)); i++) await sleep(100);
+  results.continue.scopeDialog = await mainJs(`(() => {
+    const d = document.querySelector('dialog[open]');
+    return d ? { modes: [...d.querySelectorAll('input[name="scope"]')].map((r) => r.value), checked: d.querySelector('input[name="scope"]:checked')?.value } : null;
+  })()`);
+  // A picture of the app list, then back to the whole screen.
+  await mainJs(`(() => { const r = document.querySelector('dialog input[value="apps"]'); r.checked = true; r.dispatchEvent(new Event('change')); })()`);
+  for (let i = 0; i < 30 && (await mainJs(`!document.querySelector('dialog .scope-app')`)); i++) await sleep(100);
+  await shot(mainWin, 'desktop-scope-dialog.png');
+  await mainJs(`(() => { const r = document.querySelector('dialog input[value="screen"]'); r.checked = true; r.dispatchEvent(new Event('change')); })()`);
+  await mainJs(`document.querySelector('dialog [data-start]').click()`);
   for (let i = 0; i < 50 && !recorder.state.active; i++) await sleep(100);
   await sleep(500);
   results.continue.started = { sameGuide: recorder.state.guideId === guideId, stepCount: recorder.state.stepCount, continuing: recorder.state.continuing };
@@ -252,6 +264,126 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     sameSteps: !!afterDiscard && JSON.stringify(snapshot(afterDiscard)) === JSON.stringify(snapshot(afterContinue)),
     notRecording: !!afterDiscard && !afterDiscard.recording,
   };
+
+  // ---------- capture scope: specific apps, an area ----------
+  // The demo window stands in for "another app": its key is FlowDoc's own
+  // executable. "notepad-test" is a chosen app that isn't open.
+  progress('scope: apps');
+  const NOTEPAD = { key: 'notepad-test', name: 'Notepad' };
+  const listed = await listApps([NOTEPAD]);
+  results.scope = {
+    list: {
+      count: listed.length,
+      shell: listed.filter((a) => a.shell).map((a) => a.name),
+      keptClosed: listed.some((a) => a.key === NOTEPAD.key && a.closed),
+      shellLast: !!listed.at(-1)?.shell,
+    },
+  };
+  const strays = [];
+  const onStray = (a) => strays.push(a);
+  recorder.events.on('stray', onStray);
+  const widgetJs = (code) => widget.webContents.executeJavaScript(code);
+  const db = (w) => screen.getDisplayMatching(w.getBounds());
+  const fraction = (r, d) => ({ x: (r.x - d.bounds.x) / d.bounds.width, y: (r.y - d.bounds.y) / d.bounds.height, w: r.width / d.bounds.width, h: r.height / d.bounds.height });
+  await startRecording({ scope: { mode: 'apps', apps: [NOTEPAD] } });
+  await sleep(400);
+  const appsId = recorder.state.guideId;
+  results.scope.apps = { bar: await widgetJs(`(() => { const b = document.getElementById('scope'); return { shown: !b.hidden, text: b.textContent.trim() }; })()`) };
+  await click('h1');
+  await recorder.drain();
+  await sleep(200);
+  results.scope.apps.ignored = recorder.state.stepCount;
+  results.scope.apps.stray = strays.at(-1) || null;
+  results.scope.apps.notice = await widgetJs(`(() => { const n = document.getElementById('notice'); return { shown: !n.hidden, text: document.getElementById('noticeText').textContent }; })()`);
+  await widgetJs(`document.getElementById('scope').click()`);
+  await sleep(1500);
+  await shot(widget, 'desktop-bar-apps.png');
+  results.scope.apps.panel = await widgetJs(`(() => ({ shown: !document.getElementById('panel').hidden, rows: document.querySelectorAll('#appList .app').length, icons: [...document.querySelectorAll('#appList img')].map((i) => i.naturalWidth > 0), fits: document.getElementById('wrap').getBoundingClientRect().height <= innerHeight + 1 }))()`);
+  await widgetJs(`document.getElementById('panelClose').click()`);
+  await sleep(300);
+  // The bar's Add button: adds the app and keeps the click just made.
+  const addAt = await widgetJs(`(() => { const b = document.getElementById('noticeAdd').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+  await press(addAt);
+  for (let i = 0; i < 30 && recorder.state.stepCount < 1; i++) await sleep(100);
+  results.scope.apps.kept = recorder.state.stepCount;
+  results.scope.apps.barAfter = await widgetJs(`document.getElementById('scope').textContent.trim()`);
+  await click('#subject');
+  await recorder.drain();
+  await recorder.stop();
+  await sleep(500);
+  const appsGuide = await getGuide(appsId);
+  results.scope.apps.steps = appsGuide.steps.map((s) => ({ text: s.text, crop: s.crop, app: s.app }));
+  results.scope.apps.saved = appsGuide.captureScope;
+  results.scope.apps.expectedCrop = fraction(demo.getBounds(), db(demo));
+  recorder.events.off('stray', onStray);
+
+  progress('scope: area');
+  // The area picker, driven like a person: drag a rectangle around the
+  // Subject field on the demo's display, then press Start.
+  const rectOf = async (selector) => {
+    const r = await demo.webContents.executeJavaScript(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`);
+    const cb = demo.getContentBounds();
+    return { x: cb.x + r.x, y: cb.y + r.y, width: r.width, height: r.height };
+  };
+  const subject = await rectOf('#subject');
+  const display = db(demo);
+  const want = { x: Math.round(subject.x - 20), y: Math.round(subject.y - 20), width: Math.round(subject.width + 40), height: Math.round(subject.height + 40) };
+  const picking = startRecording({ scope: { mode: 'area' } });
+  for (let i = 0; i < 50 && areaPicker.windows.length === 0; i++) await sleep(100);
+  await sleep(1200);
+  results.scope.area = { overlays: areaPicker.windows.length, displays: screen.getAllDisplays().length };
+  const overlay = areaPicker.windows.find((w) => w.displayId === display.id);
+  if (overlay) {
+    const lx = want.x - display.bounds.x;
+    const ly = want.y - display.bounds.y;
+    const ow = overlay.webContents;
+    ow.sendInputEvent({ type: 'mouseMove', x: lx, y: ly });
+    ow.sendInputEvent({ type: 'mouseDown', x: lx, y: ly, button: 'left', clickCount: 1 });
+    for (let t = 1; t <= 6; t++) {
+      ow.sendInputEvent({ type: 'mouseMove', x: Math.round(lx + (want.width * t) / 6), y: Math.round(ly + (want.height * t) / 6), button: 'left', modifiers: ['leftButtonDown'] });
+      await sleep(30);
+    }
+    ow.sendInputEvent({ type: 'mouseUp', x: lx + want.width, y: ly + want.height, button: 'left', clickCount: 1 });
+    await sleep(300);
+    results.scope.area.selected = await ow.executeJavaScript(`(() => { const s = document.getElementById('sel').getBoundingClientRect(); return { x: s.x, y: s.y, width: s.width, height: s.height, bar: getComputedStyle(document.getElementById('bar')).display }; })()`);
+    await shot(overlay, 'desktop-area-picker.png');
+    const startAt = await ow.executeJavaScript(`(() => { const b = document.getElementById('start').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+    ow.sendInputEvent({ type: 'mouseDown', x: Math.round(startAt.x), y: Math.round(startAt.y), button: 'left', clickCount: 1 });
+    ow.sendInputEvent({ type: 'mouseUp', x: Math.round(startAt.x), y: Math.round(startAt.y), button: 'left', clickCount: 1 });
+  }
+  const areaState = await within(picking, 8000);
+  results.scope.area.started = !!areaState?.active;
+  results.scope.area.area = areaState?.scope?.area || null;
+  results.scope.area.want = { ...want, displayId: display.id };
+  results.scope.area.overlaysClosed = areaPicker.windows.length === 0 && !areaPicker.open;
+  if (areaState?.active) {
+    const areaId = areaState.guideId;
+    await sleep(300);
+    const a = areaState.scope.area;
+    const strips = areaFrame.pieces();
+    results.scope.area.frame = {
+      count: strips.length,
+      bounds: areaFrame.bounds,
+      visible: areaFrame.visible,
+      outside: strips.every((r) => r.x + r.width <= a.x || r.x >= a.x + a.width || r.y + r.height <= a.y || r.y >= a.y + a.height),
+      hugs: strips.every((r) => r.x <= a.x + a.width + 4 && r.x + r.width >= a.x - 4 && r.y <= a.y + a.height + 4 && r.y + r.height >= a.y - 4),
+    };
+    results.scope.area.bar = await widgetJs(`(() => { const b = document.getElementById('scope'); return { shown: !b.hidden, text: b.textContent.trim() }; })()`);
+    await click('#submit'); // outside the area
+    await click('#subject'); // inside
+    await type('Hi');
+    await sleep(2600);
+    await recorder.drain();
+    await recorder.stop();
+    await sleep(300);
+    results.scope.area.frameHiddenAfter = !areaFrame.visible;
+    const areaGuide = await getGuide(areaId);
+    results.scope.area.steps = areaGuide.steps.map((s) => ({ text: s.text, crop: s.crop }));
+    results.scope.area.expectedCrop = fraction(want, display);
+    results.scope.area.saved = areaGuide.captureScope;
+  } else {
+    for (const w of areaPicker.windows) w.webContents.send('area:clear');
+  }
   demo.destroy();
   await shot(mainWin, 'desktop-editor.png');
 

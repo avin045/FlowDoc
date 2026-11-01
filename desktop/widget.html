@@ -2,13 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
   <title>FlowDoc recorder</title>
   <style>
     html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-    body { display: flex; align-items: center; justify-content: center; font: 500 13px/1 system-ui, "Segoe UI", sans-serif; user-select: none; }
+    body { font: 500 13px/1 system-ui, "Segoe UI", sans-serif; user-select: none; }
+    /* The window is sized to #wrap (see widget.js), anchored at its bottom centre. */
+    #wrap { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: max-content; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 12px; }
     .bar { display: flex; align-items: center; gap: 4px; height: 44px; padding: 0 6px 0 0; border-radius: 999px; background: #0f172a; color: #f8fafc;
       box-shadow: 0 6px 20px rgba(15, 23, 42, .35); }
+    .card { background: #0f172a; color: #f8fafc; border-radius: 14px; box-shadow: 0 6px 20px rgba(15, 23, 42, .35); }
+    [hidden] { display: none !important; }
+    #panel { width: 300px; padding: 10px 6px 6px; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px 8px; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .panel-head button { height: 24px; padding: 0 8px; }
+    #appList { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+    .app { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; line-height: 1.25; }
+    .app:hover { background: rgba(255, 255, 255, .08); }
+    .app input { accent-color: #6366f1; width: 15px; height: 15px; margin: 0; flex: none; }
+    .app img, .app .avatar { width: 20px; height: 20px; flex: none; border-radius: 5px; }
+    .app .avatar { display: grid; place-items: center; background: #334155; font-size: 11px; font-weight: 700; }
+    .app .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app small { color: #94a3b8; font-size: 11.5px; }
+    #panelError { color: #fda4af; font-size: 12px; padding: 6px 8px 2px; }
+    #notice { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 14px; border-radius: 999px; }
+    #noticeText { margin-right: 4px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+    #notice .done { height: 28px; }
+    #notice #noticeDismiss { height: 28px; padding: 0 9px; color: #94a3b8; }
     /* Only the status area moves the window. Drag regions swallow clicks on
        Windows, so the buttons must stay outside them. */
     .grip { display: flex; align-items: center; height: 100%; padding: 0 6px 0 14px; cursor: grab; -webkit-app-region: drag; app-region: drag; }
@@ -29,14 +49,27 @@
   </style>
 </head>
 <body>
+  <div id="wrap">
+  <div id="panel" class="card" hidden>
+    <div class="panel-head"><span>Apps to capture</span><button id="panelClose" title="Close">Close</button></div>
+    <div id="appList"></div>
+    <div id="panelError" hidden></div>
+  </div>
+  <div id="notice" class="card" hidden>
+    <span id="noticeText"></span>
+    <button id="noticeAdd" class="done" title="Capture this app too, starting with the click you just made">Add</button>
+    <button id="noticeDismiss" title="Don't ask about this app again">✕</button>
+  </div>
   <div class="bar" id="bar">
     <div class="grip" title="Drag to move">
       <span class="dot"></span><span class="label" id="label">Capturing</span>
       <span class="meta" id="meta">0 steps · 0:00</span>
     </div>
+    <button id="scope" hidden></button>
     <button id="toggle" title="Pause capture"></button>
     <button id="discard" class="discard" title="Discard this recording"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg><span id="discardLabel" hidden>Discard?</span></button>
     <button id="done" class="done" title="Stop and build the guide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Done</button>
+  </div>
   </div>
   <script src="widget.js"></script>
 </body>

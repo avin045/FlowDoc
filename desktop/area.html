@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>FlowDoc: choose an area</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; }
+    body { cursor: crosshair; font: 500 13px/1.3 system-ui, "Segoe UI", sans-serif; color: #f8fafc; }
+    /* Dim everything; the selection cuts a clear hole with its shadow. */
+    #shade { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); }
+    body.has-sel #shade, body.hovering #shade { display: none; }
+    #hover { position: fixed; display: none; outline: 2px solid #a5b4fc; box-shadow: 0 0 0 9999px rgba(15, 23, 42, .45); pointer-events: none; }
+    body.hovering #hover { display: block; }
+    #sel { position: fixed; display: none; outline: 2px solid #6366f1; box-shadow: 0 0 0 9999px rgba(15, 23, 42, .5); cursor: move; }
+    body.has-sel #sel { display: block; }
+    .handle { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; background: #fff; border: 2px solid #6366f1; border-radius: 3px; box-sizing: border-box; }
+    .handle[data-dir="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+    .handle[data-dir="n"] { left: 50%; top: 0; cursor: ns-resize; }
+    .handle[data-dir="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+    .handle[data-dir="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+    .handle[data-dir="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+    .handle[data-dir="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+    .handle[data-dir="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+    .handle[data-dir="w"] { left: 0; top: 50%; cursor: ew-resize; }
+    #size { position: absolute; left: 0; top: -26px; padding: 3px 7px; border-radius: 6px; background: #0f172a; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #bar { position: fixed; display: none; gap: 6px; padding: 6px; border-radius: 12px; background: #0f172a; box-shadow: 0 8px 24px rgba(15, 23, 42, .4); cursor: default; }
+    body.has-sel:not(.dragging) #bar { display: flex; }
+    button { all: unset; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 8px; cursor: pointer; color: #e2e8f0; white-space: nowrap; }
+    button:hover { background: rgba(255, 255, 255, .12); }
+    button.primary { background: #4f46e5; color: #fff; }
+    button.primary:hover { background: #4338ca; }
+    .rec { width: 9px; height: 9px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, .3); }
+    #hint { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); padding: 10px 16px; border-radius: 999px; background: #0f172a; box-shadow: 0 8px 24px rgba(15, 23, 42, .4); white-space: nowrap; pointer-events: none; }
+    #hint kbd { font: inherit; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, .14); }
+    body.dragging #hint, body.has-sel #hint { display: none; }
+  </style>
+</head>
+<body>
+  <div id="shade"></div>
+  <div id="hover"></div>
+  <div id="sel">
+    <span id="size"></span>
+    <i class="handle" data-dir="nw"></i><i class="handle" data-dir="n"></i><i class="handle" data-dir="ne"></i><i class="handle" data-dir="e"></i>
+    <i class="handle" data-dir="se"></i><i class="handle" data-dir="s"></i><i class="handle" data-dir="sw"></i><i class="handle" data-dir="w"></i>
+  </div>
+  <div id="bar">
+    <button id="cancel">Cancel</button>
+    <button id="start" class="primary"><span class="rec"></span>Start capture</button>
+  </div>
+  <div id="hint">Drag to choose an area, or click a window · <kbd>Enter</kbd> to start · <kbd>Esc</kbd> to cancel</div>
+  <script src="area-renderer.js"></script>
+</body>
+</html>

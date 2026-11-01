@@ -349,6 +349,107 @@ async function removeGuide(id, title) {
 
 // ---------- capture launcher ----------
 
+const SCOPE_ICONS = {
+  screen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  area: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
+  apps: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+};
+
+// Desktop: what the capture records — the whole screen, an area, or only some
+// apps. Starts from the guide's last choice when continuing, otherwise from
+// the last capture's. Resolves to a scope, or null if cancelled.
+async function chooseScope({ guideId } = {}) {
+  const prev = (guideId && (await getGuide(guideId))?.captureScope) || (await desktop.settings.get()).capture?.lastScope || { mode: 'screen' };
+  const dlg = h(`<dialog><div class="dlg">
+    <h2>${guideId ? 'Continue capturing' : 'Start a capture'}</h2>
+    <p class="sub">${guideId ? 'New steps are added after the last step of this guide. What should FlowDoc record?' : 'What should FlowDoc record?'}</p>
+    <div class="formats scope-modes">
+      <label class="format"><input type="radio" name="scope" value="screen"><strong>${SCOPE_ICONS.screen} Whole screen</strong><span>Every click and key press, in any app.</span></label>
+      <label class="format"><input type="radio" name="scope" value="area"><strong>${SCOPE_ICONS.area} An area</strong><span>Drag a rectangle. Only what happens inside it is recorded.</span></label>
+      <label class="format"><input type="radio" name="scope" value="apps"><strong>${SCOPE_ICONS.apps} Specific apps</strong><span>Only the apps you tick. Shots are cropped to the app's window.</span></label>
+    </div>
+    <div class="scope-apps" hidden>
+      <div class="scope-apps-head"><span>Apps to capture</span><button class="ghost" data-refresh>Refresh</button></div>
+      <div class="scope-app-list"></div>
+      <p class="card-meta">Dialogs an app opens, like a file picker, count as that app. You can add apps later from the recorder bar.</p>
+    </div>
+    <div class="dlg-foot"><button class="secondary" data-close>Cancel</button><button class="primary" data-start><span class="rec"></span> <span class="label">Start capture</span></button></div>
+  </div></dialog>`);
+  document.body.append(dlg);
+  const list = $('.scope-app-list', dlg);
+  const start = $('[data-start]', dlg);
+  const chosen = new Map((prev.apps || []).map((a) => [a.key, a]));
+  let loaded = false;
+  const mode = () => $('input[name="scope"]:checked', dlg)?.value || 'screen';
+
+  function sync() {
+    const m = mode();
+    $('.scope-apps', dlg).hidden = m !== 'apps';
+    $('.label', start).textContent = m === 'area' ? 'Select area' : 'Start capture';
+    start.disabled = m === 'apps' && !chosen.size;
+    if (m === 'apps' && !loaded) loadApps();
+  }
+
+  async function loadApps() {
+    loaded = true;
+    list.innerHTML = '<p class="card-meta">Looking for open apps…</p>';
+    let apps = [];
+    try {
+      apps = await desktop.recorder.apps([...chosen.values()]);
+    } catch (err) {
+      list.innerHTML = '';
+      list.append(h(`<p class="card-meta">Couldn't list open apps: ${escapeHtml(err.message)}</p>`));
+      return;
+    }
+    list.innerHTML = '';
+    if (!apps.some((a) => !a.shell)) list.append(h('<p class="card-meta">No other apps are open. Open the apps you want to record, then click Refresh.</p>'));
+    for (const a of apps) {
+      const row = h(`<label class="scope-app"><input type="checkbox"><span class="scope-app-icon"></span><span class="scope-app-name"><b></b><small></small></span></label>`);
+      const box = $('input', row);
+      box.checked = chosen.has(a.key);
+      box.addEventListener('change', () => {
+        if (box.checked) chosen.set(a.key, { key: a.key, name: a.name });
+        else chosen.delete(a.key);
+        sync();
+      });
+      if (a.icon) $('.scope-app-icon', row).append(Object.assign(document.createElement('img'), { src: a.icon, alt: '' }));
+      else $('.scope-app-icon', row).textContent = a.shell ? '' : a.name.slice(0, 1).toUpperCase();
+      if (a.shell) $('.scope-app-icon', row).innerHTML = SCOPE_ICONS.screen;
+      $('b', row).textContent = a.name;
+      $('small', row).textContent = a.closed
+        ? 'Not open right now'
+        : a.shell
+          ? 'Switching apps from the taskbar'
+          : a.windows.length > 1
+            ? `${a.windows.length} windows`
+            : a.windows[0] && a.windows[0] !== a.name
+              ? a.windows[0]
+              : 'Open';
+      list.append(row);
+    }
+  }
+
+  $(`input[value="${['area', 'apps'].includes(prev.mode) ? prev.mode : 'screen'}"]`, dlg).checked = true;
+  dlg.querySelectorAll('input[name="scope"]').forEach((r) => r.addEventListener('change', sync));
+  $('[data-refresh]', dlg).addEventListener('click', loadApps);
+  sync();
+
+  return new Promise((resolve) => {
+    let result = null;
+    $('[data-close]', dlg).addEventListener('click', () => dlg.close());
+    start.addEventListener('click', () => {
+      const m = mode();
+      result = m === 'apps' ? { mode: 'apps', apps: [...chosen.values()] } : m === 'area' ? { mode: 'area', area: prev.area || null } : { mode: 'screen' };
+      dlg.close();
+    });
+    dlg.addEventListener('close', () => {
+      dlg.remove();
+      resolve(result);
+    });
+    dlg.showModal();
+  });
+}
+
 // With `guideId`, the capture continues that guide: new steps are added after
 // its last one, and its title and edits are kept.
 async function startCaptureDialog({ guideId } = {}) {
@@ -356,11 +457,15 @@ async function startCaptureDialog({ guideId } = {}) {
     const state = await desktop.recorder.state();
     if (state.active) return guideId ? toast('A capture is already running') : desktop.recorder.stop();
     await flushSave();
+    const scope = await chooseScope({ guideId });
+    if (!scope) return;
+    let started;
     try {
-      await desktop.recorder.start(guideId ? { guideId } : undefined);
+      started = await desktop.recorder.start({ ...(guideId ? { guideId } : {}), scope });
     } catch (err) {
-      return toast(`Couldn't start capturing: ${err.message}`);
+      return toast(`Couldn't start capturing: ${String(err.message).replace(/^.*Error: /, '')}`);
     }
+    if (started?.cancelled) return;
     if (guideId) await route(); // show the guide locked, with steps arriving live
     return;
   }

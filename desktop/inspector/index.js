@@ -99,7 +99,7 @@ export function createInspector({ timeout = 1500, log = () => {} } = {}) {
         try {
           app = pid ? String(readFileSync(`/proc/${pid}/comm`)).trim() : '';
         } catch {}
-        resolve({ name: '', type: 'Window', window: title || '', app, fallback: true });
+        resolve({ name: '', type: 'Window', window: title || '', app, exe: app, fallback: true });
       });
     });
   }
@@ -134,6 +134,12 @@ export function createInspector({ timeout = 1500, log = () => {} } = {}) {
     async focused() {
       const el = available === false ? null : await call('focus');
       return el || null;
+    },
+    // Open top-level windows, front to back where the platform knows the order:
+    // [{ title, exe, app, path, pid, rect (physical px), minimized, cls, ownerExe }]
+    async windows() {
+      const list = available === false ? null : await call('windows', {}, 5000);
+      return Array.isArray(list) ? list : [];
     },
     stop() {
       if (child) {
