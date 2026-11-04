@@ -20,6 +20,10 @@ Everything runs on your computer. There is no account and no server. The only da
 
 ![A guide open in the editor with its toolbar](docs/screenshots/guide-editor.png)
 
+**Export**: PDF, Word (.docx), HTML, Markdown (.zip with images) or a JSON backup, with or without screenshots.
+
+![Export guide dialog](docs/screenshots/export.png)
+
 **Settings**: guides folder, optional AI assistant (Gemini or Groq), optional Notion, click highlight style and capture options.
 
 | | |
