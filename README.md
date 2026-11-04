@@ -16,6 +16,10 @@ Everything runs on your computer. There is no account and no server. The only da
 
 ![Start a capture dialog](docs/screenshots/new-capture.png)
 
+**Inside a guide**: edit steps, then use the toolbar to Improve with AI, Translate, Continue capturing, toggle Highlights, Copy text, Print, save to Notion, or Export.
+
+![A guide open in the editor with its toolbar](docs/screenshots/guide-editor.png)
+
 **Settings**: guides folder, optional AI assistant (Gemini or Groq), optional Notion, click highlight style and capture options.
 
 | | |
