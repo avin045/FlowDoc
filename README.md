@@ -4,6 +4,24 @@ Record a process once and get a step-by-step guide with annotated screenshots, i
 
 Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider or to Notion in the desktop app, and both are off by default.
 
+## Screenshots
+
+**Home page**, in light and dark mode (pick System, Light or Dark at the bottom left):
+
+| Light | Dark |
+| --- | --- |
+| ![FlowDoc home page in light mode](docs/screenshots/home-light.png) | ![FlowDoc home page in dark mode](docs/screenshots/home-dark.png) |
+
+**Start a capture**: record the whole screen, only an area, or only the apps you choose.
+
+![Start a capture dialog](docs/screenshots/new-capture.png)
+
+**Settings**: guides folder, optional AI assistant (Gemini or Groq), optional Notion, click highlight style and capture options.
+
+| | |
+| --- | --- |
+| ![Settings: guides folder, AI assistant and Notion](docs/screenshots/settings-1.png) | ![Settings: Notion, click highlight and capture options](docs/screenshots/settings-2.png) |
+
 ## Contents
 
 1. [Before you start: what you need](#1-before-you-start-what-you-need)
