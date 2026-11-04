@@ -2,7 +2,7 @@
 
 Record a process once and get a step-by-step guide with annotated screenshots, in the style of Scribe (scribehow.com). Edit the guide, blur private details, and export it as **PDF, Word (.docx), HTML, Markdown** or a JSON backup. The desktop app can also save guides straight to **Notion**.
 
-Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider or to Notion in the desktop app, and both are off by default.
+Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider (desktop app or extension) or to Notion (desktop app), and both are off by default.
 
 ## Screenshots
 
@@ -31,6 +31,8 @@ Everything runs on your computer. There is no account and no server. The only da
 | ![Settings: guides folder, AI assistant and Notion](docs/screenshots/settings-1.png) | ![Settings: Notion, click highlight and capture options](docs/screenshots/settings-2.png) |
 
 ## Contents
+
+- [Screenshots](#screenshots)
 
 1. [Before you start: what you need](#1-before-you-start-what-you-need)
 2. [Which version should I use?](#2-which-version-should-i-use)
@@ -86,7 +88,7 @@ Everything runs on your computer. There is no account and no server. The only da
 
 | For | You need | Where |
 | --- | --- | --- |
-| AI write-ups in the desktop app | A Google Gemini **or** Groq API key (both have free tiers) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) · [console.groq.com/keys](https://console.groq.com/keys) |
+| AI (Improve with AI and Translate), in the desktop app or the extension | A Google Gemini **or** Groq API key (both have free tiers) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) · [console.groq.com/keys](https://console.groq.com/keys) |
 | Save to Notion from the desktop app | A Notion account and an integration you create | [notion.so/profile/integrations](https://www.notion.so/profile/integrations) |
 
 ---
@@ -99,9 +101,13 @@ Everything runs on your computer. There is no account and no server. The only da
 | Platforms | Windows 10/11, Linux (X11 session) | Chrome, Edge (Windows, Linux, macOS) |
 | Install | Run from source, or build an installer | Load the `extension` folder into the browser |
 | Tested | Yes, on Windows (Linux not yet on real hardware) | Automated test in Microsoft Edge only; **not yet tested by hand in Chrome** |
-| AI write-ups (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual | — |
+| What to record | Whole screen, an area, or only the apps you choose | The browser tab you pick |
+| Improve with AI (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual. Key encrypted with your system keychain. | Optional: same styles. Key kept in browser storage, not encrypted. |
+| Translate a guide | Optional (needs AI) | Optional (needs AI) |
+| Continue capturing | Yes | Yes |
 | Save to Notion | Optional | — |
 | Your own guides folder | Yes | — (stored in the browser) |
+| Click highlight style (Normal / Box only / None) | Yes, in Settings | — (only the per-guide **Highlights** toggle) |
 | Light / Dark / System theme | Yes | Yes |
 | Editor and exports | Same | Same |
 
