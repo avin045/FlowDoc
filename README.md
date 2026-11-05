@@ -4,6 +4,21 @@ Record a process once and get a step-by-step guide with annotated screenshots, i
 
 Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider (desktop app or extension) or to Notion (desktop app), and both are off by default.
 
+## Contents
+
+- [Screenshots](#screenshots)
+
+1. [Before you start: what you need](#1-before-you-start-what-you-need)
+2. [Which version should I use?](#2-which-version-should-i-use)
+3. [Get the code](#3-get-the-code)
+4. [Guide A: Desktop app (Windows and Linux)](#guide-a-desktop-app-windows-and-linux) (recommended)
+5. [Guide B: Chrome / Edge extension](#guide-b-chrome--edge-extension) (not yet tested in Chrome)
+6. [Guide C: Editing and exporting a guide](#guide-c-editing-and-exporting-a-guide) (the same in both versions)
+7. [Web workspace (no install)](#web-workspace-no-install)
+8. [For developers](#for-developers)
+9. [Limitations](#limitations)
+10. [License](#license)
+
 ## Screenshots
 
 **Home page**, in light and dark mode (pick System, Light or Dark at the bottom left):
@@ -29,21 +44,6 @@ Everything runs on your computer. There is no account and no server. The only da
 | | |
 | --- | --- |
 | ![Settings: guides folder, AI assistant and Notion](docs/screenshots/settings-1.png) | ![Settings: Notion, click highlight and capture options](docs/screenshots/settings-2.png) |
-
-## Contents
-
-- [Screenshots](#screenshots)
-
-1. [Before you start: what you need](#1-before-you-start-what-you-need)
-2. [Which version should I use?](#2-which-version-should-i-use)
-3. [Get the code](#3-get-the-code)
-4. [Guide A: Desktop app (Windows and Linux)](#guide-a-desktop-app-windows-and-linux) (recommended)
-5. [Guide B: Chrome / Edge extension](#guide-b-chrome--edge-extension) (not yet tested in Chrome)
-6. [Guide C: Editing and exporting a guide](#guide-c-editing-and-exporting-a-guide) (the same in both versions)
-7. [Web workspace (no install)](#web-workspace-no-install)
-8. [For developers](#for-developers)
-9. [Limitations](#limitations)
-10. [License](#license)
 
 ---
 
