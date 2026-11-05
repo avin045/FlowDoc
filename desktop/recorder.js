@@ -6,7 +6,7 @@
 // of the screen or to some apps (scope.js); anything outside is not a step.
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { screen } from 'electron';
+import { nativeImage, screen } from 'electron';
 import uiohookPkg from 'uiohook-napi';
 import { createGuide, deleteGuide, getGuide, saveGuide } from '../extension/shared/guides.js';
 import { appAllowed, appKey, appName, cleanScope, cropOf, pointInArea, SHELL } from './scope.js';
@@ -50,6 +50,54 @@ const KEY_NAMES = new Map(
     .map(([name, code]) => [code, name.replace(/^Arrow/, '').replace(/^Numpad/, 'Num ')]),
 );
 const PRESS_KEYS = new Set(['Delete', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'Insert', 'PrintScreen'].map((n) => K[n]).filter((k) => k !== undefined));
+
+// Browsers whose address bar the Windows inspector can read, and the keys
+// that switch tabs in them.
+const BROWSERS = new Set(['chrome', 'msedge', 'brave', 'vivaldi', 'opera', 'firefox', 'chromium']);
+const TAB_KEYS = /^Ctrl\+(Shift\+)?(Tab|PageUp|PageDown|[1-9])$/;
+const isAddressBar = (el) => el?.className === 'OmniboxViewViews' || el?.automationId === 'urlbar-input';
+
+// Browsers leave the scheme out of the address bar ("github.com/avin045").
+export function webUrl(text) {
+  const t = String(text || '').trim();
+  if (!t || /\s/.test(t)) return '';
+  if (/^(https?|file):/i.test(t)) return t;
+  if (/^[a-z]:[\\/]/i.test(t)) return `file:///${t.replace(/\\/g, '/')}`; // a local file
+  if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?([/?#]|$)/i.test(t)) return `http://${t}`;
+  if (/^[\w-]+(\.[\w-]+)+(:\d+)?([/?#]|$)/.test(t)) return `https://${t}`;
+  return ''; // chrome://, edge://, about: pages, or text being typed
+}
+
+// ---------- repeated clicks ----------
+
+// Whether a screen changed between two shots of the same display, looking only
+// inside `region` and outside `masks` (fractions of the display; null region =
+// all of it). Strict on purpose: a few dozen changed pixels (a counter going
+// from 1 to 2) count as a change, so only truly identical screens match.
+export function shotsDiffer(a, b, region = null, masks = []) {
+  const ia = nativeImage.createFromDataURL(a);
+  const ib = nativeImage.createFromDataURL(b);
+  const { width: W, height: H } = ia.getSize();
+  const sb = ib.getSize();
+  if (!W || !H || W !== sb.width || H !== sb.height) return true;
+  const r = region || { x: 0, y: 0, w: 1, h: 1 };
+  const box = { x: Math.round(r.x * W), y: Math.round(r.y * H), width: Math.max(1, Math.round(r.w * W)), height: Math.max(1, Math.round(r.h * H)) };
+  box.width = Math.min(box.width, W - box.x);
+  box.height = Math.min(box.height, H - box.y);
+  const pa = ia.crop(box).toBitmap();
+  const pb = ib.crop(box).toBitmap();
+  const skip = masks.map((m) => ({ x1: m.x * W - box.x, y1: m.y * H - box.y, x2: (m.x + m.w) * W - box.x, y2: (m.y + m.h) * H - box.y }));
+  let changed = 0;
+  for (let y = 0; y < box.height; y++) {
+    for (let x = 0; x < box.width; x++) {
+      const i = (y * box.width + x) * 4;
+      if (Math.abs(pa[i] - pb[i]) + Math.abs(pa[i + 1] - pb[i + 1]) + Math.abs(pa[i + 2] - pb[i + 2]) <= 48) continue;
+      if (skip.some((m) => x >= m.x1 && x < m.x2 && y >= m.y1 && y < m.y2)) continue;
+      if (++changed > 40) return true;
+    }
+  }
+  return false;
+}
 
 // ---------- text helpers ----------
 
@@ -99,13 +147,16 @@ export function describeTyping(field, value) {
 
 // ---------- recorder ----------
 
-export function createRecorder({ capture, inspector, settings, isOwnWindow, isOwnElement = () => false, widgetBounds, log = () => {} }) {
+export function createRecorder({ capture, inspector, settings, isOwnWindow, isOwnElement = () => false, widgetBounds, barCover, log = () => {} }) {
   const events = new EventEmitter();
   let state = { active: false, paused: false, guideId: null, stepCount: 0, startedAt: 0 };
   let pipeline = Promise.resolve();
   let draft = null;
   let metaAlone = false;
   let lastClick = null; // { stepId, at, x, y }
+  // The last step, when it was a click: what it hit and the screen just before
+  // it. A click on the same thing with the screen unchanged since is a repeat.
+  let lastClickStep = null; // { button, app, window, name, type, x, y, displayId, frame, region }
   let hookRunning = false;
   let captureSettings = {};
   // "Continue capturing": the ids of the steps the guide already had. They are
@@ -188,6 +239,18 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     });
   }
 
+  const overlaps = (a, d) => a.x < d.x + d.width && a.x + a.width > d.x && a.y < d.y + d.height && a.y + a.height > d.y;
+  const fractionOf = (a, d) => ({ x: (a.x - d.x) / d.width, y: (a.y - d.y) / d.height, w: a.width / d.width, h: a.height / d.height });
+
+  // When other apps may see the recorder bar, it is kept out of our own shot
+  // by hiding it from captures for a moment (capture.grab's `cover`). Where
+  // that isn't possible (Linux), buildStep blurs it instead.
+  function grab(display) {
+    const wb = barCover && widgetBounds?.();
+    if (!wb || !overlaps(wb, display.bounds)) return capture.grab(display);
+    return capture.grab(display, { cover: { ...barCover, rect: fractionOf(wb, display.bounds) } });
+  }
+
   // Builds a step relative to the display it happened on.
   function buildStep({ frame, display, point, el, rect, action, text, extra = {} }) {
     const db = display.bounds;
@@ -214,16 +277,14 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       const big = d.width * d.height > db.width * db.height * 0.4;
       if (!big) step.target = { x: d.x - db.x, y: d.y - db.y, w: d.width, h: d.height };
     }
-    // When the recorder bar can show up in captures (Linux, or the user made it
-    // visible to other apps), blur it out of the shot.
+    // A recorder bar that is still in the shot (Linux, or hiding it failed) is blurred.
     const wb = widgetBounds?.();
-    if (wb && frame && wb.x < db.x + db.width && wb.x + wb.width > db.x && wb.y < db.y + db.height && wb.y + wb.height > db.y) {
-      step.redactions.push({ x: (wb.x - db.x) / db.width, y: (wb.y - db.y) / db.height, w: wb.width / db.width, h: wb.height / db.height });
-    }
+    if (wb && frame && !frame.barHidden && overlaps(wb, db)) step.redactions.push(fractionOf(wb, db));
     return step;
   }
 
   async function appendSteps(steps, { replaceId } = {}) {
+    lastClickStep = null; // any new step ends a run of repeated clicks
     const guide = await getGuide(state.guideId);
     if (!guide) return;
     for (const step of steps) {
@@ -260,10 +321,125 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     return screen.getDisplayNearestPoint({ x: Math.round(point.x), y: Math.round(point.y) });
   }
 
+  // ---------- browser tabs ----------
+
+  // Switching browser tabs (a click on a tab, Ctrl+Tab and friends) or
+  // pressing Enter in the address bar becomes "Navigate to <link>", with a
+  // shot of the page it opened. Nothing when the guide is already on that page.
+  async function browserNavigation(el, display, wait = 600) {
+    if (!inspector.browserUrl || !BROWSERS.has(String(el?.topExe || el?.exe || '').toLowerCase())) return null;
+    await new Promise((r) => setTimeout(r, wait));
+    const info = await inspector.browserUrl(el.hwnd);
+    const url = webUrl(info?.url);
+    if (!url) return null;
+    const guide = await getGuide(state.guideId);
+    if (guide?.steps.findLast((s) => s.url)?.url === url) return null;
+    const frame = await grab(display);
+    // No highlight: the tab or field acted on isn't what the new page shows.
+    const page = { ...el, rect: null, parentRect: null };
+    return buildStep({ frame, display, el: page, action: 'navigate', text: `Navigate to ${b(url)}`, extra: { href: url, url, pageTitle: clean(info.title, 120) } });
+  }
+
+  // A click that changes nothing, on the same thing as the click before it
+  // (someone clicking again while an app is slow, or unsure it worked), is not
+  // a new step. Such a click is held for a moment (`pendingClick`) and judged
+  // by the screen: it is dropped when nothing changed between the two clicks
+  // (the first one didn't respond yet), or when this click itself changed
+  // nothing (compared with the screen at the next action, or 1.5 s later).
+  // Clicks, double-clicks and right-clicks are each compared with their own
+  // kind. Settings > Capture > "Ignore repeated clicks that change nothing".
+  let pendingClick = null; // { step, record, prev, display, timer }
+  const SETTLE_MS = 1500;
+
+  function clickRecord(el, point, button, display, frame, stepId) {
+    // The app's window, a little inside its edges: the frame Windows reports
+    // can take in a few pixels of whatever is behind the window.
+    const w = el?.topRect?.w > 0 ? rectToDip(el.topRect) : null;
+    const r = w && w.width > 24 && w.height > 24 ? cropOf({ x: w.x + 8, y: w.y + 8, width: w.width - 16, height: w.height - 16 }, display) : null;
+    return {
+      stepId,
+      kind: button === 2 ? 'rightclick' : 'click', // becomes 'dblclick' on a second press
+      button,
+      app: appKey(el),
+      window: clean(el?.window, 120),
+      name: clean(el?.name || el?.parentName),
+      type: String(el?.type || ''),
+      x: point.x,
+      y: point.y,
+      displayId: display.id,
+      frame,
+      region: scope.mode === 'area' ? cropOf(scope.area, display) : r,
+    };
+  }
+
+  // Whether `cur` is a click on the same thing as `prev`, right after it.
+  function sameTarget(prev, cur) {
+    if (captureSettings.ignoreRepeats === false || !prev || !prev.frame?.dataUrl || !cur.frame?.dataUrl) return false;
+    if (prev.button !== cur.button || prev.displayId !== cur.displayId || prev.app !== cur.app || prev.window !== cur.window) return false;
+    const near = Math.hypot(prev.x - cur.x, prev.y - cur.y);
+    return prev.name && cur.name ? prev.name === cur.name && prev.type === cur.type && near < 60 : near < 15;
+  }
+
+  // Whether the screen looks the same in two shots of `rec`'s window, leaving
+  // out the mouse pointer at `points` and the recorder bar.
+  function unchanged(a, b, rec, display, points) {
+    if (!a?.dataUrl || !b?.dataUrl) return false;
+    const db = display.bounds;
+    const pointer = (p) => ({ x: (p.x - 6 - db.x) / db.width, y: (p.y - 6 - db.y) / db.height, w: 48 / db.width, h: 56 / db.height });
+    const masks = points.filter(Boolean).map(pointer);
+    const wb = widgetBounds?.();
+    if (wb && overlaps(wb, db)) masks.push(fractionOf(wb, db));
+    try {
+      return !shotsDiffer(a.dataUrl, b.dataUrl, rec.region, masks);
+    } catch (err) {
+      log(`repeat check failed: ${err.message}`);
+      return false;
+    }
+  }
+
+  // Decides a held click, with `after` a shot taken once it had time to act
+  // (the next action's own shot, or one taken now) and `at` the pointer then.
+  async function settlePending(after, at) {
+    const p = pendingClick;
+    if (!p) return;
+    pendingClick = null;
+    clearTimeout(p.timer);
+    const { record: cur, prev, display } = p;
+    const sameKind = prev.kind === cur.kind;
+    const idleBefore = sameKind && unchanged(prev.frame, cur.frame, cur, display, [prev, cur]);
+    const idleAfter = sameKind && !idleBefore && after?.dataUrl && unchanged(cur.frame, after, cur, display, [cur, at]);
+    if (idleBefore || idleAfter) {
+      log(`dropped a repeated ${cur.kind} (${idleBefore ? 'no change since the last one' : 'it changed nothing'})`);
+      lastClickStep = cur; // still the click the next one is compared with
+      return;
+    }
+    await appendSteps([p.step]);
+    lastClickStep = cur;
+  }
+
+  // Settles a held click with a fresh shot (from the pipeline, so it runs
+  // after the click that set it). `framePromise` reuses a shot already taken
+  // of the same display.
+  function settleSoon(framePromise, displayId, point) {
+    enqueue(async () => {
+      const p = pendingClick;
+      if (!p) return;
+      const frame = framePromise && displayId === p.display.id ? await framePromise : await grab(p.display);
+      if (pendingClick === p) await settlePending(frame, point || screen.getCursorScreenPoint());
+    });
+  }
+
+  function holdClick(step, record, prev, display) {
+    const p = { step, record, prev, display, timer: 0 };
+    p.timer = setTimeout(() => pendingClick === p && settleSoon(), SETTLE_MS);
+    pendingClick = p;
+  }
+
   // ---------- typing ----------
 
   function startDraft() {
-    draft = { chars: '', lastKeyAt: Date.now(), field: null, snapshot: null, snapAt: 0, idle: 0, snap: 0, point: screen.getCursorScreenPoint() };
+    if (pendingClick) settleSoon(); // typing: decide a held click before the screen fills with text
+    draft ={ chars: '', lastKeyAt: Date.now(), field: null, snapshot: null, snapAt: 0, idle: 0, snap: 0, point: screen.getCursorScreenPoint() };
     const d = draft;
     d.fieldPromise = inspector.focused().then((f) => (d.field = f));
   }
@@ -300,7 +476,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     clearTimeout(d.idle);
     if (!d.chars) return;
     const cursor = screen.getCursorScreenPoint();
-    framePromise ||= capture.grab(shotDisplay(cursor));
+    framePromise ||= grab(shotDisplay(cursor));
     enqueue(async () => {
       await Promise.race([d.fieldPromise, new Promise((r) => setTimeout(r, 800))]);
       const fresh = d.snapshot && d.snapAt >= d.lastKeyAt;
@@ -353,14 +529,26 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       lastClick = null;
       enqueue(async () => {
         const el = await prev.elPromise;
-        await patchStep(prev.stepId, { text: describeClick(el, { clicks: 2 }), action: 'dblclick' });
+        const patch = { text: describeClick(el, { clicks: 2 }), action: 'dblclick' };
+        const p = pendingClick;
+        if (p?.step.id === prev.stepId) {
+          // A held click became a double-click: judge it as one, from now.
+          Object.assign(p.step, patch);
+          p.record.kind = 'dblclick';
+          clearTimeout(p.timer);
+          p.timer = setTimeout(() => pendingClick === p && settleSoon(), SETTLE_MS);
+          return;
+        }
+        await patchStep(prev.stepId, patch);
+        if (lastClickStep?.stepId === prev.stepId) lastClickStep.kind = 'dblclick';
       });
       return;
     }
 
     const display = displayAt(point);
-    const framePromise = capture.grab(display);
+    const framePromise = grab(display);
     const elPromise = inspector.elementAt(e.x, e.y);
+    settleSoon(framePromise, display.id, point); // this click's shot shows what a held click did
     if (draft) flushDraft(framePromise);
     const stepId = randomUUID();
     lastClick = { stepId, at: Date.now(), x: point.x, y: point.y, elPromise };
@@ -369,20 +557,39 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       if (isOwnElement(el, point)) return; // a click on FlowDoc itself
       const step = buildStep({ frame, display, point, el, action: button === 2 ? 'rightclick' : 'click', text: describeClick(el, { button, clicks: 1 }) });
       step.id = stepId;
-      if (!appAllowed(scope, el)) return noteStray(el, step);
+      if (!appAllowed(scope, el)) {
+        lastClickStep = null;
+        return noteStray(el, step);
+      }
+      const record = clickRecord(el, point, button, display, frame, stepId);
+      // The same thing clicked again: held until it shows whether it did anything.
+      if (sameTarget(lastClickStep, record)) return holdClick(step, record, lastClickStep, display);
+      if (button === 1 && String(el?.type).toLowerCase() === 'tabitem') {
+        const nav = await browserNavigation(el, display);
+        if (nav) {
+          await appendSteps([{ ...nav, id: stepId }]);
+          lastClickStep = record;
+          return;
+        }
+      }
       await appendSteps([step]);
+      lastClickStep = record;
     });
   }
 
   function pressStep(label, e) {
     const cursor = screen.getCursorScreenPoint();
     const display = shotDisplay(cursor);
-    const framePromise = capture.grab(display);
+    const framePromise = grab(display);
     const elPromise = inspector.focused();
+    settleSoon(framePromise, display.id);
     if (draft) flushDraft(framePromise);
     enqueue(async () => {
       const [frame, el] = await Promise.all([framePromise, elPromise]);
       if (!inScope(el)) return;
+      const switching = TAB_KEYS.test(label) || (label === 'Enter' && isAddressBar(el));
+      const nav = switching && (await browserNavigation(el, display, label === 'Enter' ? 1200 : 600));
+      if (nav) return appendSteps([nav]);
       await appendSteps([buildStep({ frame, display, el, action: 'key', text: `Press ${b(label)}`, extra: { key: label } })]);
     });
   }
@@ -442,6 +649,9 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   async function start({ title = '', guideId, scope: wanted } = {}) {
     if (state.active) return { ...state };
     captureSettings = (await settings.get()).capture;
+    lastClickStep = null;
+    clearTimeout(pendingClick?.timer);
+    pendingClick = null;
     let guide = guideId ? await getGuide(guideId) : null;
     if (guideId && !guide) throw new Error('That guide no longer exists.');
     scope = cleanScope(wanted);
@@ -475,6 +685,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   async function stop() {
     if (!state.active) return { ...state };
     flushDraft();
+    settleSoon();
     const guideId = state.guideId;
     state.paused = true; // stop accepting new events while the queue drains
     await pipeline;
@@ -502,6 +713,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     draft = null;
     state.paused = true;
     await pipeline;
+    clearTimeout(pendingClick?.timer);
+    pendingClick = null;
     if (hookRunning) {
       uIOhook.stop();
       hookRunning = false;
@@ -526,7 +739,10 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
 
   function setPaused(paused) {
     if (!state.active) return { ...state };
-    if (paused) flushDraft();
+    if (paused) {
+      flushDraft();
+      settleSoon();
+    }
     state.paused = paused;
     emitState();
     return { ...state };
@@ -588,7 +804,11 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     },
     // Used by the self-test to feed synthetic hook events.
     simulate: { mousedown: onMouseDown, keydown: onKeyDown, keyup: onKeyUp },
-    drain: () => pipeline,
+    // Tests: finish queued work, deciding a held click now.
+    drain: () => {
+      settleSoon();
+      return pipeline;
+    },
   };
 }
 

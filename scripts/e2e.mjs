@@ -274,6 +274,134 @@ try {
   const discarded = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
   check(discarded && !discarded.recording && JSON.stringify(snap(discarded)) === JSON.stringify(snap(continued)), 'Discard removes only the new steps and keeps the guide');
 
+  // ---------- switching tabs while capturing ----------
+  console.log('\nSwitching tabs');
+  await page.bringToFront();
+  const tabsGuide = (await send({ type: 'start', tabId })).guideId;
+  await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+  await page.click('#subject');
+  await page.waitForTimeout(700);
+  const other = await context.newPage();
+  const otherUrl = `http://localhost:${PORT}/demo/index.html?tab=2`;
+  await other.goto(otherUrl);
+  await other.bringToFront();
+  await other.waitForTimeout(1500);
+  await page.bringToFront();
+  await page.waitForTimeout(1500);
+  await page.bringToFront(); // already on this page: no step
+  await page.waitForTimeout(800);
+  const tabsDone = context.waitForEvent('page');
+  await send({ type: 'stop' });
+  await (await tabsDone).close();
+  await other.close();
+  const switched = await app.evaluate((id) => window.flowdocApp.getGuide(id), tabsGuide);
+  const navs = switched.steps.filter((s) => s.action === 'navigate').slice(1);
+  console.log(`   ${switched.steps.map((s) => s.text).join(' / ')}`);
+  check(navs[0]?.text === `Navigate to **${otherUrl}**` && navs[0].href === otherUrl && !!navs[0].screenshot, 'switching to another tab adds "Navigate to" with its link and a screenshot', navs[0]?.text);
+  check(navs.length === 2 && navs[1].href === page.url(), 'switching back adds the first page again, once', navs.map((s) => s.href).join(' , '));
+  await control.evaluate(async (id) => (await import('/shared/guides.js')).deleteGuide(id), tabsGuide);
+
+  // ---------- repeated clicks ----------
+  console.log('\nRepeated clicks');
+  await page.bringToFront();
+  await page.evaluate(() => {
+    const add = (id, text, top, onclick) => {
+      const b = document.createElement('button');
+      b.id = id;
+      b.textContent = text;
+      b.style.cssText = `position:fixed;left:24px;top:${top}px;z-index:9;padding:8px 14px;background:#e2e8f0;color:#0f172a;border:1px solid #64748b;border-radius:6px;font:14px sans-serif;outline:none`;
+      if (onclick) b.onclick = onclick;
+      document.body.append(b);
+    };
+    add('noop', 'Refresh', 16);
+    // The button keeps its name; only a small total next to it changes.
+    const total = document.createElement('span');
+    total.style.cssText = 'position:fixed;left:140px;top:72px;z-index:9;font:14px sans-serif';
+    total.textContent = 'Total: 0';
+    document.body.append(total);
+    let n = 0;
+    add('count', 'Add one', 64, () => (total.textContent = `Total: ${++n}`));
+    // Like a user's guide: text left selected, then a code line clicked again
+    // and again. Only the first click changes anything (the selection goes).
+    const code = document.createElement('pre');
+    code.id = 'code';
+    code.textContent = 'npm test';
+    code.style.cssText = 'position:fixed;left:24px;top:112px;z-index:9;margin:0;padding:8px 14px;background:#f1f5f9;color:#0f172a;font:14px monospace';
+    const chosen = document.createElement('pre');
+    chosen.id = 'chosen';
+    chosen.textContent = 'npm run test:desktop';
+    chosen.style.cssText = 'position:fixed;left:24px;top:160px;z-index:9;margin:0;padding:8px 14px;background:#f1f5f9;color:#0f172a;font:14px monospace';
+    document.body.append(code, chosen);
+  });
+  // `plan`: selectors to click; "dbl:" double-clicks, "select:" selects that element's text.
+  const recordClicks = async (plan) => {
+    const id = (await send({ type: 'start', tabId })).guideId;
+    await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+    await page.waitForTimeout(600);
+    for (const item of plan) {
+      const [how, sel] = item.includes(':') ? item.split(/:(.*)/) : ['click', item];
+      if (how === 'select') {
+        await page.evaluate((s) => getSelection().selectAllChildren(document.querySelector(s)), sel);
+        await page.waitForTimeout(300);
+        continue;
+      }
+      if (how === 'dbl') await page.dblclick(sel);
+      else await page.click(sel);
+      await page.waitForTimeout(900);
+    }
+    await page.waitForTimeout(1800); // the last click, if held, settles on its own
+    const done = context.waitForEvent('page');
+    await send({ type: 'stop' });
+    await (await done).close();
+    const g = await app.evaluate((gid) => window.flowdocApp.getGuide(gid), id);
+    await control.evaluate(async (gid) => (await import('/shared/guides.js')).deleteGuide(gid), id);
+    return g.steps.filter((s) => s.action === 'click' || s.action === 'dblclick').map((s) => s.text);
+  };
+  const howMany = (list, re) => list.filter((t) => re.test(t)).length;
+  const repOn = await recordClicks([
+    '#noop', '#noop', '#noop',
+    '#count', '#count', '#count',
+    'select:#chosen', '#code', '#code', '#code',
+    'dbl:#noop', 'dbl:#noop',
+    '#count', 'dbl:#count',
+  ]);
+  check(howMany(repOn, /^Click \*\*Refresh/) === 1, 'clicking Refresh 3 times when nothing changes is one step', repOn.join(' / '));
+  check(howMany(repOn, /Add one/) === 5, 'clicking "Add one" 3 times keeps 3 steps (each click changed something)', repOn.join(' / '));
+  check(howMany(repOn, /npm test/) === 1, 'with text selected, clicking a line 3 times is one step: only the first click changed anything', repOn.join(' / '));
+  check(howMany(repOn, /^Double-click \*\*Refresh/) === 1, 'double-clicking Refresh twice is one step', repOn.join(' / '));
+  check(repOn.at(-2) === 'Click **Add one**' && repOn.at(-1) === 'Double-click **Add one**', 'a click then a double-click on the same thing are both kept', repOn.join(' / '));
+  await control.evaluate(() => chrome.storage.local.set({ flowdoc_capture: { ignoreRepeats: false } }));
+  const repOff = await recordClicks(['#noop', '#noop']);
+  check(howMany(repOff, /Refresh/) === 2, 'with the setting off, every click is a step again', repOff.join(' / '));
+  await control.evaluate(() => chrome.storage.local.remove('flowdoc_capture'));
+
+  // ---------- copy menu ----------
+  console.log('\nCopy as text or Markdown');
+  await app.bringToFront();
+  await app.evaluate(() => {
+    window.__copied = [];
+    navigator.clipboard.writeText = async (t) => void window.__copied.push(t);
+  });
+  const copyItems = [];
+  for (const i of [0, 1, 2]) {
+    await app.click('[data-act="copy"]');
+    await app.waitForSelector('.menu [role="menuitem"]');
+    copyItems.push(await app.locator('.menu [role="menuitem"]').nth(i).textContent());
+    await app.locator('.menu [role="menuitem"]').nth(i).click();
+    await app.waitForFunction((n) => window.__copied.length === n, i + 1);
+  }
+  const [asText, mdWithImages, mdPlain] = await app.evaluate(() => window.__copied);
+  check(copyItems.join(' | ') === 'Text | Markdown with images | Markdown without images', 'Copy offers Text, Markdown with images and without', copyItems.join(' | '));
+  check(/^\S.*\n\n1\. /s.test(asText) && !asText.includes('!['), 'Text copies the numbered steps');
+  const embedded = mdWithImages.match(/!\[Step \d+\]\(data:image\/[a-z]+;base64,/g) || [];
+  check(mdWithImages.startsWith('# ') && embedded.length >= 3, 'Markdown with images has the screenshots inside the text', `${embedded.length} images, ${Math.round(mdWithImages.length / 1024)} KB`);
+  check(mdPlain.startsWith('# ') && /### 1\. /.test(mdPlain) && !mdPlain.includes('!['), 'Markdown without images has the steps and no images', `${Math.round(mdPlain.length / 1024)} KB`);
+  await app.evaluate(() => window.scrollTo(0, 0));
+  await app.click('[data-act="copy"]');
+  await app.waitForSelector('.menu [role="menuitem"]');
+  await app.screenshot({ path: join(out, 'editor-copy-menu.png') });
+  await app.keyboard.press('Escape');
+
   // ---------- AI in the extension: settings, Translate, Improve ----------
   console.log('\nAI (Translate and Improve)');
   // A stand-in for Gemini, answering the extension's requests in the page.
@@ -303,7 +431,12 @@ try {
   await app.click('dialog .needs-ai [data-act="settings"]');
   await app.waitForSelector('dialog .settings #aiProvider');
   const sections = await app.evaluate(() => [...document.querySelectorAll('dialog .settings h3')].map((h) => h.textContent.trim()));
-  check(!sections.some((s) => /Guides folder|Notion|Capture/.test(s)) && sections.some((s) => s.startsWith('AI assistant')), 'extension settings show only what applies there', sections.join(', '));
+  check(!sections.some((s) => /Guides folder|Notion/.test(s)) && sections.some((s) => s.startsWith('AI assistant')), 'extension settings show only what applies there', sections.join(', '));
+  const capture = await app.evaluate(() => ({
+    boxes: [...document.querySelectorAll('dialog .settings input[type="checkbox"]')].map((c) => c.name),
+    ignoreRepeats: document.querySelector('dialog .settings [name="ignoreRepeats"]')?.checked,
+  }));
+  check(JSON.stringify(capture.boxes) === '["ignoreRepeats"]' && capture.ignoreRepeats === true, 'Capture has only "Ignore repeated clicks that change nothing", ticked by default', JSON.stringify(capture));
   check(/browser profile only/.test(await app.locator('dialog .settings .sub').textContent()), 'settings say where the key is kept');
   await app.selectOption('dialog .settings #aiProvider', 'gemini');
   await app.fill('dialog .settings #aiKey', 'test-extension-key');

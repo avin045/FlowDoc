@@ -3,12 +3,15 @@
 // screen capture and the accessibility inspector run for real, without moving
 // the user's mouse), exercises AI enhancement against a mock server, runs the
 // exporters inside the workspace, and writes results.json for the runner.
-import { BrowserWindow, desktopCapturer, nativeTheme, screen } from 'electron';
+import { BrowserWindow, desktopCapturer, nativeImage, nativeTheme, screen } from 'electron';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import uiohookPkg from 'uiohook-napi';
 import { deleteGuide, getGuide, saveGuide } from '../extension/shared/guides.js';
+import { createInspector } from './inspector/index.js';
 import { createSettings } from './settings.js';
 import { folderUsable } from './store.js';
 
@@ -391,8 +394,8 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
 
   // ---------- recorder bar visible to other apps (Settings > Capture) ----------
   // Unticking "Hide the recorder bar…" lets screen recorders and meetings see
-  // the bar and the area border; FlowDoc's own shots blur the bar instead, and
-  // clicks on it are still not steps.
+  // the bar and the area border; FlowDoc still keeps the bar out of its own
+  // shots (Linux blurs it), and clicks on it are still not steps.
   progress('recorder bar visibility');
   {
     const bar = getWidget();
@@ -437,45 +440,200 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     await sleep(700);
     await recorder.drain();
     bv.barClickIgnored = recorder.state.stepCount === before;
-    // What a screen recorder or meeting app sees: grab the screen with the bar
-    // visible to captures, then hidden, and compare the bar's spot.
-    const barPixels = async () => {
-      await sleep(400);
-      const d = screen.getDisplayMatching(b);
-      const size = { width: Math.round(d.bounds.width * d.scaleFactor), height: Math.round(d.bounds.height * d.scaleFactor) };
-      const src = (await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size })).find((x) => x.display_id === String(d.id)) || null;
-      if (!src) return null;
-      const img = src.thumbnail;
-      const k = img.getSize().width / d.bounds.width;
-      return img.crop({ x: Math.round((b.x - d.bounds.x) * k), y: Math.round((b.y - d.bounds.y) * k), width: Math.round(b.width * k), height: Math.round(b.height * k) }).toBitmap();
-    };
-    const seen = await barPixels();
-    applyBarProtection(true);
-    const unseen = await barPixels();
-    applyBarProtection(false);
-    if (seen && unseen && seen.length === unseen.length) {
-      let diff = 0;
-      for (let i = 0; i < seen.length; i += 4) diff += Math.abs(seen[i] - unseen[i]) + Math.abs(seen[i + 1] - unseen[i + 1]) + Math.abs(seen[i + 2] - unseen[i + 2]);
-      bv.screenGrab = { meanDiff: Math.round(diff / (seen.length / 4)) };
-    } else bv.screenGrab = { error: 'no screen source' };
     demo.showInactive();
     await sleep(300);
     await click('#subject');
     await recorder.drain();
+    bv.barProtectedAfterShot = prot(bar);
     const g = await getGuide(started.guideId);
     const last = g.steps.filter((s) => s.kind === 'action').at(-1);
     const d = screen.getDisplayMatching(b).bounds;
     const want = { x: (b.x - d.x) / d.width, y: (b.y - d.y) / d.height, w: b.width / d.width, h: b.height / d.height };
     const r = last?.redactions?.[0];
     bv.blurred = { count: last?.redactions?.length || 0, matches: !!r && ['x', 'y', 'w', 'h'].every((k) => Math.abs(r[k] - want[k]) < 0.01) };
+    // What a screen recorder or meeting app sees: grab the screen with the bar
+    // visible to captures, then hidden, and compare the bar's spot. FlowDoc's
+    // own shot of that spot should look like the hidden grab.
+    // Each crop is also saved (bar-*.png) to look at when a check fails.
+    const barSpot = (img, name) => {
+      const k = img.getSize().width / d.width;
+      const spot = img.crop({ x: Math.round((b.x - d.x) * k), y: Math.round((b.y - d.y) * k), width: Math.round(b.width * k), height: Math.round(b.height * k) }).resize({ width: b.width, height: b.height });
+      writeFileSync(join(out, `bar-${name}.png`), spot.toPNG());
+      return spot.toBitmap();
+    };
+    const barPixels = async (name) => {
+      await sleep(400);
+      const dd = screen.getDisplayMatching(b);
+      const size = { width: Math.round(d.width * dd.scaleFactor), height: Math.round(d.height * dd.scaleFactor) };
+      const src = (await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size })).find((x) => x.display_id === String(dd.id)) || null;
+      return src ? barSpot(src.thumbnail, name) : null;
+    };
+    const meanDiff = (a, c) => {
+      if (!a || !c || a.length !== c.length) return null;
+      let diff = 0;
+      for (let i = 0; i < a.length; i += 4) diff += Math.abs(a[i] - c[i]) + Math.abs(a[i + 1] - c[i + 1]) + Math.abs(a[i + 2] - c[i + 2]);
+      return Math.round(diff / (a.length / 4));
+    };
+    const seen = await barPixels('visible');
+    applyBarProtection(true);
+    const unseen = await barPixels('hidden');
+    applyBarProtection(false);
+    bv.screenGrab = seen && unseen ? { meanDiff: meanDiff(seen, unseen) } : { error: 'no screen source' };
+    const ours = last?.screenshot ? barSpot(nativeImage.createFromDataURL(last.screenshot), 'own-shot') : null;
+    bv.ownShot = { barHidden: !!ours, toHidden: meanDiff(ours, unseen), toVisible: meanDiff(ours, seen) };
     await recorder.discard();
     bv.discarded = !(await getGuide(started.guideId));
     bv.restoreBox = await toggle();
     bv.on = { saved: (await settings.get()).capture.hideBar, barProtected: prot(bar), borderProtected: borderProtected() };
     results.barVisibility = bv;
   }
+
+  // ---------- repeated clicks (Settings > Capture) ----------
+  // Clicking the same thing again when nothing changed is not a new step;
+  // clicks that change something are all kept; the setting turns it off.
+  progress('repeated clicks');
+  {
+    const rc = { setting: (await settings.get()).capture.ignoreRepeats };
+    // Plain buttons with no hover look, so only what a click does shows up on screen.
+    await demo.webContents.executeJavaScript(`(() => {
+      const add = (id, text, top, onclick) => {
+        const b = document.createElement('button');
+        b.id = id;
+        b.textContent = text;
+        b.style.cssText = 'position:fixed;left:24px;top:' + top + 'px;z-index:9;padding:8px 14px;background:#e2e8f0;color:#0f172a;border:1px solid #64748b;border-radius:6px;font:14px sans-serif;outline:none';
+        if (onclick) b.onclick = onclick;
+        document.body.append(b);
+      };
+      add('noop', 'Refresh', 16);
+      // The button keeps its name; only a small total next to it changes.
+      const total = document.createElement('span');
+      total.style.cssText = 'position:fixed;left:140px;top:72px;z-index:9;font:14px sans-serif;color:#0f172a';
+      total.textContent = 'Total: 0';
+      document.body.append(total);
+      let n = 0;
+      add('count', 'Add one', 64, () => (total.textContent = 'Total: ' + ++n));
+      // Like clicking away a text selection: only the first click changes anything.
+      const mark = document.createElement('span');
+      mark.style.cssText = 'position:fixed;left:140px;top:120px;z-index:9;font:14px sans-serif;color:#0f172a;background:#fde047;padding:2px 6px';
+      mark.textContent = 'selected text';
+      document.body.append(mark);
+      add('clear', 'Clear', 112, () => (mark.style.background = 'transparent'));
+    })()`);
+    demo.showInactive();
+    await sleep(500);
+    // Both presses of a double-click, the way the hook and the page see them.
+    async function dblclick(selector) {
+      const { css, dip } = await centerOf(selector);
+      const phys = toPhysical({ x: Math.round(dip.x), y: Math.round(dip.y) });
+      const at = { x: Math.round(css.x), y: Math.round(css.y), button: 'left' };
+      for (const clickCount of [1, 2]) {
+        recorder.simulate.mousedown({ x: phys.x, y: phys.y, button: 1, clicks: clickCount });
+        await sleep(40);
+        demo.webContents.sendInputEvent({ type: 'mouseDown', ...at, clickCount });
+        demo.webContents.sendInputEvent({ type: 'mouseUp', ...at, clickCount });
+        await sleep(120);
+      }
+      await sleep(700);
+    }
+    const texts = async (id) => (await getGuide(id)).steps.filter((s) => s.kind === 'action').map((s) => s.text);
+    const started = await startRecording({ scope: { mode: 'screen' } });
+    await sleep(600);
+    for (let i = 0; i < 3; i++) await click('#noop');
+    for (let i = 0; i < 3; i++) await click('#count');
+    for (let i = 0; i < 3; i++) await click('#clear');
+    for (let i = 0; i < 2; i++) await dblclick('#noop');
+    for (let i = 0; i < 2; i++) await click('#noop', { button: 2 });
+    await click('#noop');
+    await dblclick('#noop'); // a different kind of click from the one before: kept
+    await recorder.drain();
+    rc.on = await texts(started.guideId);
+    await recorder.discard();
+    await settings.update({ capture: { ignoreRepeats: false } });
+    const again = await startRecording({ scope: { mode: 'screen' } });
+    await sleep(600);
+    for (let i = 0; i < 2; i++) await click('#noop');
+    await recorder.drain();
+    rc.off = await texts(again.guideId);
+    await recorder.discard();
+    await settings.update({ capture: { ignoreRepeats: true } });
+    results.repeatedClicks = rc;
+  }
   demo.destroy();
   await shot(mainWin, 'desktop-editor.png');
+
+  // ---------- browser tabs (Windows, with Edge installed) ----------
+  // A click on another tab and Ctrl+Tab become "Navigate to <link>", read
+  // from the browser's address bar; clicking the tab already shown again adds nothing.
+  const EDGE = join(process.env['ProgramFiles(x86)'] || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe');
+  if (win32 && existsSync(EDGE)) {
+    progress('browser tabs');
+    const bt = {};
+    const pageA = pathToFileURL(join(process.cwd(), 'demo', 'index.html')).href;
+    const pageB = pathToFileURL(join(process.cwd(), 'demo', 'ticket.html')).href;
+    const profile = mkdtempSync(join(tmpdir(), 'flowdoc-edge-'));
+    const edge = spawn(EDGE, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--window-position=40,40', '--window-size=1100,750', '--new-window', pageA, pageB], { stdio: 'ignore' });
+    const probe = createInspector();
+    try {
+      await probe.warmUp();
+      // Find the Edge window and a tab in its tab strip.
+      let win = null;
+      for (let i = 0; i < 40 && !win; i++) {
+        await sleep(250);
+        win = (await probe.windows()).find((w) => w.exe === 'msedge' && /Northwind/.test(w.title) && !w.minimized);
+      }
+      const tabAt = async (wantName) => {
+        for (let y = win.rect.y + 12; y < win.rect.y + 70; y += 8) {
+          for (let x = win.rect.x + 60; x < win.rect.x + 700; x += 30) {
+            const el = await probe.elementAt(x, y);
+            if (String(el?.type).toLowerCase() === 'tabitem' && wantName.test(el.name || '')) return { x, y };
+          }
+        }
+        return null;
+      };
+      bt.window = !!win;
+      const tabA = win && (await tabAt(/Sign in/));
+      const tabB = win && (await tabAt(/ticket/i));
+      bt.tabsFound = !!tabA && !!tabB;
+      if (bt.tabsFound) {
+        const started = await startRecording({ scope: { mode: 'screen' } });
+        await sleep(600);
+        const steps = async () => (await getGuide(started.guideId)).steps.filter((s) => s.kind === 'action');
+        // The hook only reports the click; the tab on show stays as it is. A
+        // click on a tab adds "Navigate to" the page on show once ...
+        const clickTab = async (p) => {
+          recorder.simulate.mousedown({ x: p.x, y: p.y, button: 1, clicks: 1 });
+          await sleep(1500);
+          await recorder.drain();
+        };
+        await clickTab(tabB);
+        bt.first = (await steps()).map((s) => ({ action: s.action, text: s.text, href: s.href, shot: !!s.screenshot, target: !!s.target }));
+        // ... and a second click with the same page on show changes nothing, so it adds nothing.
+        await clickTab(tabB);
+        bt.again = (await steps()).map((s) => s.action);
+        // A real Ctrl+Tab switches Edge's tab (only when Edge is the window in
+        // front), and the recorder is told about the key press.
+        const front = await probe.browserUrl();
+        bt.edgeInFront = front?.exe === 'msedge';
+        if (bt.edgeInFront) {
+          uIOhook.keyTap(K.Tab, [K.Ctrl]);
+          recorder.simulate.keydown({ keycode: K.Tab, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false });
+          await sleep(2000);
+          await recorder.drain();
+          bt.ctrlTab = (await steps()).at(-1);
+          bt.ctrlTab = bt.ctrlTab && { action: bt.ctrlTab.action, text: bt.ctrlTab.text, href: bt.ctrlTab.href };
+        }
+        await recorder.discard();
+      }
+    } catch (err) {
+      bt.error = String(err?.stack || err);
+    } finally {
+      probe.stop();
+      spawn('taskkill', ['/PID', String(edge.pid), '/T', '/F'], { stdio: 'ignore' });
+    }
+    bt.pageA = pageA;
+    bt.pageB = pageB;
+    results.browserTabs = bt;
+  }
 
   // ---------- AI enhancement against the mock providers ----------
   const js = (code) => mainWin.webContents.executeJavaScript(code);

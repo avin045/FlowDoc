@@ -30,6 +30,7 @@ const DEFAULTS = {
     hideBar: true, // keep the recorder bar out of screen recordings and meetings
     typedText: true, // include what was typed (passwords are always masked)
     unknownFieldText: false, // include keystrokes when the field type can't be detected
+    ignoreRepeats: true, // a click repeated on the same thing that changed nothing is not a new step
     // What the last capture recorded, offered again next time (see scope.js).
     lastScope: { mode: 'screen', apps: [], area: null },
   },

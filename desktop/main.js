@@ -104,6 +104,19 @@ function isOwnElement(el, point) {
   return app.getAppMetrics().some((m) => m.pid === el.pid);
 }
 
+// A bar that other apps may see is hidden from captures for the moment
+// FlowDoc takes a shot, so it stays out of the guide (others see it blink).
+// Counted, because shots can overlap.
+let barCovers = 0;
+const barCover = {
+  hide() {
+    if (barCovers++ === 0) widgetWin?.setContentProtection(true);
+  },
+  show() {
+    if (--barCovers === 0) widgetWin?.setContentProtection(hideBar);
+  },
+};
+
 const recorder = createRecorder({
   capture,
   inspector,
@@ -111,8 +124,9 @@ const recorder = createRecorder({
   isOwnWindow,
   isOwnElement,
   // Bounds only when the bar can show up in our own screenshots, so the
-  // recorder blurs it there.
+  // recorder keeps it out of them.
   widgetBounds: () => (widgetWin && widgetWin.isVisible() && !barHiddenFromCaptures() ? widgetWin.getBounds() : null),
+  barCover: process.platform === 'linux' ? null : barCover,
   log,
 });
 
@@ -142,7 +156,7 @@ let hideBar = true;
 const barHiddenFromCaptures = () => hideBar && process.platform !== 'linux';
 function applyBarProtection(hide = hideBar) {
   hideBar = hide !== false;
-  widgetWin?.setContentProtection(hideBar);
+  widgetWin?.setContentProtection(hideBar || barCovers > 0);
   areaFrame.setProtected(hideBar);
 }
 

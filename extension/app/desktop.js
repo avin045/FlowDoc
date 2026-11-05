@@ -1,6 +1,6 @@
 // Workspace settings and the AI dialogs (Improve with AI, Translate). The
-// desktop app shows every setting; the browser extension shows the AI and
-// click-highlight ones (aiHost.js keeps its key in the browser profile).
+// desktop app shows every setting; the browser extension shows the AI,
+// click-highlight and repeated-click ones (aiHost.js keeps them in the browser profile).
 import { STYLES, TRANSLATE_PARTS, translationPieces, UI_NAME_MODES, testConnection } from './ai.js';
 import { aiEnabled, aiHost } from './aiHost.js';
 import { cancelJob, estimateRemaining, getJob, onJobChange, startJob } from './aiJobs.js';
@@ -117,15 +117,17 @@ export async function openSettingsDialog({ toast, onClose }) {
       <label class="hl-card"><input type="radio" name="hlStyle" value="none"><strong>None</strong><span>No marks on screenshots</span></label>
     </div>
 
-    ${desktop ? `
     <h3>Capture</h3>
+    ${desktop ? `
     <label class="check"><input type="checkbox" name="hideWindow"> Minimise FlowDoc while capturing</label>
     <label class="check"><input type="checkbox" name="hideBar"> Hide the recorder bar from screen recordings and meetings</label>
-    <p class="hint hide-bar-hint">Untick to let screen recorders and meeting apps show the bar (and the area border). Clicks on the bar are never recorded as steps, and FlowDoc blurs the bar out of its own screenshots.</p>
+    <p class="hint hide-bar-hint">Untick to let screen recorders and meeting apps show the bar (and the area border). Clicks on the bar are never recorded as steps, and the bar still stays out of FlowDoc's own screenshots: viewers see it blink briefly at each step.</p>
     <label class="check"><input type="checkbox" name="typedText"> Include typed text in steps (passwords are always hidden)</label>
     <label class="check"><input type="checkbox" name="unknownFieldText"> Also include keystrokes when the field type can't be detected</label>
-    <p class="hint">Shortcut to start or stop a capture from anywhere: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></p>
     ` : ''}
+    <label class="check"><input type="checkbox" name="ignoreRepeats"> Ignore repeated clicks that change nothing</label>
+    <p class="hint">Clicking, double-clicking or right-clicking the same thing again (waiting for a slow page, or unsure the click worked) doesn't add another step when that click changed nothing. Clicks that change something are always kept.</p>
+    ${desktop ? '<p class="hint">Shortcut to start or stop a capture from anywhere: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></p>' : ''}
 
     <div class="dlg-foot"><button type="button" class="primary" data-close>Done</button></div>
   </form></dialog>`);
@@ -144,6 +146,7 @@ export async function openSettingsDialog({ toast, onClose }) {
       fillModels();
     }
     $('.test-result').textContent = '';
+    f.ignoreRepeats.checked = s.capture?.ignoreRepeats !== false;
     if (!desktop) return;
     f.hideWindow.checked = s.capture.hideWindow;
     f.hideBar.checked = s.capture.hideBar !== false;
@@ -199,10 +202,10 @@ export async function openSettingsDialog({ toast, onClose }) {
   f.customModel.addEventListener('change', () => {
     if (f.customModel.value.trim()) save({ ai: { models: { [s.ai.provider]: f.customModel.value.trim() } } });
   });
-  for (const name of desktop ? ['hideWindow', 'hideBar', 'typedText', 'unknownFieldText'] : [])
+  for (const name of [...(desktop ? ['hideWindow', 'hideBar', 'typedText', 'unknownFieldText'] : []), 'ignoreRepeats'])
     f[name].addEventListener('change', async () => {
       await save({ capture: { [name]: f[name].checked } });
-      f.unknownFieldText.disabled = !s.capture.typedText;
+      if (desktop) f.unknownFieldText.disabled = !s.capture.typedText;
     });
 
   $('[data-act="saveKey"]').addEventListener('click', async () => {

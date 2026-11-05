@@ -57,24 +57,45 @@ export function createCapture({ dir, log = () => {} }) {
   }
 
   // Returns { dataUrl, width, height } for the given Electron display.
-  async function grab(display) {
+  // `cover` keeps a window that other apps may see (the recorder bar) out of
+  // this shot: { rect } in fractions of the display, plus hide() and show(),
+  // which take it out of screen captures for a moment. The frame is still the
+  // one from the instant of the grab; only the bar's spot is filled in from a
+  // frame taken while the bar was hidden. Such frames carry `barHidden: true`.
+  async function grab(display, { cover } = {}) {
     if (win && streaming) {
       const id = nextId++;
+      let hidden = false;
       const result = await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          ipcMain.removeAllListeners(`capture:frame:${id}`);
-          resolve(null);
-        }, 1500);
-        ipcMain.once(`capture:frame:${id}`, (_e, frame) => {
+        const done = (frame) => {
           clearTimeout(timer);
+          ipcMain.removeAllListeners(`capture:frame:${id}`);
+          ipcMain.removeAllListeners(`capture:held:${id}`);
           resolve(frame);
+        };
+        const timer = setTimeout(() => done(null), 2000);
+        ipcMain.once(`capture:frame:${id}`, (_e, frame) => done(frame));
+        // The renderer has kept the frame; hide the bar, then let it fill the spot.
+        ipcMain.once(`capture:held:${id}`, () => {
+          cover.hide();
+          hidden = true;
+          win?.webContents.send('capture:patch', { id });
         });
-        win.webContents.send('capture:grab', { id, displayId: display.id });
+        win.webContents.send('capture:grab', { id, displayId: display.id, patch: cover?.rect || null });
       });
+      if (hidden) cover.show();
       if (result?.dataUrl) return result;
     }
     try {
-      return await grabViaThumbnail(display);
+      if (!cover) return await grabViaThumbnail(display);
+      cover.hide();
+      try {
+        await new Promise((r) => setTimeout(r, 150));
+        const frame = await grabViaThumbnail(display);
+        return frame && { ...frame, barHidden: true };
+      } finally {
+        cover.show();
+      }
     } catch (err) {
       log(`screenshot failed: ${err.message}`);
       return null;

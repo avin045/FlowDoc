@@ -13,7 +13,7 @@ import { aiHost } from './aiHost.js';
 import { cancelJob, clearJob, estimateRemaining, getJob, isRunning, onJobChange, startTranslateJob } from './aiJobs.js';
 import { aiEnabled, cleanError, openImproveDialog, openNeedsAiDialog, openSettingsDialog, openTranslateDialog } from './desktop.js';
 import { languageLabel } from './languages.js';
-import { exportGuide, FORMATS, guideToPlainText, parseImport, printGuide } from './exporters/index.js';
+import { exportGuide, FORMATS, guideToClipboardMarkdown, guideToPlainText, parseImport, printGuide } from './exporters/index.js';
 import { openImageEditor } from './imageEditor.js';
 import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, renderStepCanvas, renderStepImage, richToHtml } from './render.js';
 import { openNotionDialog } from './notion.js';
@@ -690,7 +690,7 @@ async function renderEditor(id) {
       ${hasAi && !ro ? `<button class="ghost${aiOn ? '' : ' needs-ai'}" data-act="translate" ${aiOn ? 'title="Make a translated copy of this guide"' : 'aria-disabled="true" title="Translation needs AI. Click to set it up."'}>${I.translate}<span class="label">Translate</span></button>` : ''}
       ${ro || !(isDesktop || isExtension) ? '' : `<button class="ghost" data-act="continue" title="Record more steps and add them after the last step">${'<span class="rec"></span>'}<span class="label">Continue capturing</span></button>`}
       ${ro ? '' : `<button class="ghost" data-act="highlights" aria-pressed="true">${I.target}<span class="label">Highlights</span></button>`}
-      <button class="ghost" data-act="copy" title="Copy the steps as plain text">${I.copy}<span class="label">Copy text</span></button>
+      <button class="ghost" data-act="copy" title="Copy the guide as text or Markdown" aria-haspopup="menu">${I.copy}<span class="label">Copy</span></button>
       <button class="ghost" data-act="print">${I.print}<span class="label">Print</span></button>
       ${isDesktop && !ro ? `<button class="ghost" data-act="notion" title="Save this guide as a Notion page">${I.notion}<span class="label">Notion</span></button>` : ''}
       <button class="primary" data-act="export">${I.download} Export</button>
@@ -769,10 +769,23 @@ async function renderEditor(id) {
     if (hasAi && isRunning(current.id)) return toast('Wait for the AI to finish, or stop it first');
     startCaptureDialog({ guideId: current.id });
   });
-  $('[data-act="copy"]', view).addEventListener('click', async () => {
-    await navigator.clipboard.writeText(guideToPlainText(current));
-    toast('Steps copied to clipboard');
-  });
+  // Markdown pastes into notes apps such as Obsidian; "with images" carries
+  // the screenshots inside the text itself.
+  const copyAs = async (make, done) => {
+    try {
+      await navigator.clipboard.writeText(await make());
+      toast(done);
+    } catch (err) {
+      toast(`Could not copy: ${err?.message || err}`);
+    }
+  };
+  $('[data-act="copy"]', view).addEventListener('click', (e) =>
+    openMenu(e.currentTarget, [
+      { label: 'Text', icon: I.text, run: () => copyAs(() => guideToPlainText(current), 'Steps copied as text') },
+      { label: 'Markdown with images', icon: I.image, run: () => copyAs(() => guideToClipboardMarkdown(current, { images: true }), 'Copied as Markdown with images') },
+      { label: 'Markdown without images', icon: I.list, run: () => copyAs(() => guideToClipboardMarkdown(current, { images: false }), 'Copied as Markdown') },
+    ]),
+  );
   $('[data-act="more"]', view).addEventListener('click', (e) =>
     openMenu(e.currentTarget, [
       ...(isDesktop && current.notion?.url ? [{ label: 'Open in Notion', icon: I.notion, run: () => desktop.openExternal(current.notion.url) }] : []),

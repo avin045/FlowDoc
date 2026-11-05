@@ -312,9 +312,51 @@ check(bv.checkbox?.was === true && !bv.checkbox.disabled, 'Settings > Capture sh
 check(bv.off?.saved === false && bv.off.barProtected === false && allProtected(bv.off.borderProtected, false), 'unticking it lets recorders and meetings see the bar and the border', JSON.stringify(bv.off));
 check(bv.barShown && bv.barClickIgnored, 'a click on the visible bar is still not a step');
 check(process.platform === 'linux' || bv.screenGrab?.meanDiff > 20, 'a real screen grab (as a meeting app sees it) shows the bar only when unticked', JSON.stringify(bv.screenGrab));
-check(bv.blurred?.count === 1 && bv.blurred.matches, 'FlowDoc blurs the bar out of its own screenshots', JSON.stringify(bv.blurred));
+if (process.platform === 'linux') {
+  check(bv.blurred?.count === 1 && bv.blurred.matches, 'FlowDoc blurs the bar out of its own screenshots (Linux cannot hide it)', JSON.stringify(bv.blurred));
+} else {
+  const own = bv.ownShot || {};
+  check(bv.blurred?.count === 0 && own.toHidden !== null && own.toHidden < own.toVisible / 2, "FlowDoc's own screenshot shows what is behind the bar, not the bar or a blur", JSON.stringify({ ...own, redactions: bv.blurred?.count }));
+  check(bv.barProtectedAfterShot === false, 'after the shot the bar is visible to other apps again', String(bv.barProtectedAfterShot));
+}
 check(bv.discarded, 'the test capture was discarded');
 check(bv.restoreBox?.was === false && bv.on?.saved === true && bv.on.barProtected === true && allProtected(bv.on.borderProtected, true), 'ticking it again hides them from captures again', JSON.stringify(bv.on));
+
+console.log('\nRepeated clicks');
+const rc = r.repeatedClicks || {};
+const count = (list, re) => (list || []).filter((t) => re.test(t)).length;
+check(rc.setting === true, 'Settings > Capture > "Ignore repeated clicks that change nothing" is on by default');
+const want = [
+  'Click **Refresh**',
+  'Click **Add one**',
+  'Click **Add one**',
+  'Click **Add one**',
+  'Click **Clear**',
+  'Double-click **Refresh**',
+  'Right-click **Refresh**',
+  'Click **Refresh**',
+  'Double-click **Refresh**',
+];
+check(count(rc.on, /^Click \*\*Refresh/) === 2 && rc.on?.[0] === want[0], 'clicking Refresh 3 times when nothing changes is one step', JSON.stringify(rc.on));
+check(count(rc.on, /Add one/) === 3, 'clicking "Add one" 3 times keeps 3 steps (each click changed something)', JSON.stringify(rc.on));
+check(count(rc.on, /Clear/) === 1, 'clicking Clear 3 times is one step: only the first click changed anything', JSON.stringify(rc.on));
+check(count(rc.on, /Double-click/) === 2, 'double-clicking Refresh twice is one step', JSON.stringify(rc.on));
+check(count(rc.on, /Right-click/) === 1, 'right-clicking Refresh twice is one step', JSON.stringify(rc.on));
+check(JSON.stringify(rc.on) === JSON.stringify(want), 'a click then a double-click on the same thing are both kept, in order', JSON.stringify(rc.on));
+check(count(rc.off, /Refresh/) === 2, 'with the setting off, every click is a step again', JSON.stringify(rc.off));
+
+console.log('\nBrowser tabs');
+const bt = r.browserTabs;
+if (!bt) console.log('  - skipped (needs Windows and Microsoft Edge)');
+else if (!bt.tabsFound) check(false, "found Edge's tabs to click", JSON.stringify(bt));
+else {
+  const nav = bt.first?.[0];
+  const pages = [bt.pageA, bt.pageB];
+  check(bt.first?.length === 1 && nav.action === 'navigate' && pages.includes(nav.href) && nav.text === `Navigate to **${nav.href}**` && nav.shot && !nav.target, 'a click on a browser tab becomes "Navigate to <link>" with a shot of the page', JSON.stringify(bt.first));
+  check(JSON.stringify(bt.again) === '["navigate"]', 'clicking the tab already shown again adds nothing (a repeated click that changes nothing)', JSON.stringify(bt.again));
+  if (!bt.edgeInFront) console.log('  - Ctrl+Tab skipped: Windows kept another window in front');
+  else check(bt.ctrlTab?.action === 'navigate' && pages.includes(bt.ctrlTab.href) && bt.ctrlTab.href !== nav?.href, "Ctrl+Tab to another tab becomes 'Navigate to' that tab's link", JSON.stringify(bt.ctrlTab));
+}
 
 // Later checks work on the guide as it is after "Continue capturing".
 const finalSteps = r.guide.steps.length + (ca.added || 0);

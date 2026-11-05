@@ -23,22 +23,38 @@
 
   const nextFrame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-  async function sendSteps(steps, { capture = true } = {}) {
+  // Step messages leave in the order they were made: a double-click's second
+  // press (no screenshot) must not overtake the first press, which waits a
+  // frame for the widget to hide. Only the sending is ordered, not the replies.
+  let sendTurn = Promise.resolve();
+  async function postSteps(message, { hide }) {
+    let reply;
+    const turn = sendTurn.then(async () => {
+      // Hide the widget so it doesn't end up in the screenshot.
+      if (hide && widget) {
+        widget.host.style.visibility = 'hidden';
+        await nextFrame();
+      }
+      reply = send({ type: 'steps', ...message });
+    });
+    sendTurn = turn.catch(() => {});
+    await turn;
+    const res = await reply;
+    if (widget) widget.host.style.visibility = '';
+    if (res && !res.error) applyState(res);
+    return res;
+  }
+
+  // `settle`: a held repeated click to decide first (see "repeated clicks").
+  async function sendSteps(steps, { capture = true, settle = null } = {}) {
     steps = steps.filter(Boolean);
     if (!steps.length || !recording()) return;
-    // Hide the widget so it doesn't end up in the screenshot.
-    if (capture && widget) {
-      widget.host.style.visibility = 'hidden';
-      await nextFrame();
-    }
     const page = {
       url: location.href,
       title: document.title,
       viewport: { w: window.innerWidth, h: window.innerHeight },
     };
-    const res = await send({ type: 'steps', steps, page, capture });
-    if (widget) widget.host.style.visibility = '';
-    if (res && !res.error) applyState(res);
+    return postSteps({ steps, page, capture, ...(settle ? { settle } : {}) }, { hide: capture });
   }
 
   // ---------- describing elements ----------
@@ -187,6 +203,8 @@
     if (!recording() || !event.isTrusted) return;
     const el = event.composedPath()[0];
     if (!isTextField(el)) return;
+    if (held) settleNow();
+    run = null;
     if (!draft || draft.el !== el) {
       const pending = takeDraft();
       if (pending) sendSteps([pending]);
@@ -194,6 +212,58 @@
     }
     clearTimeout(draft.timer);
     draft.timer = setTimeout(() => sendSteps([takeDraft()]), 1200);
+  }
+
+  // ---------- repeated clicks ----------
+  // A click on the same element as the click before it (someone clicking again
+  // while a page is slow, or unsure it worked) goes to the background `hold`:
+  // screenshot taken, not yet a step. It is settled at the next action, or
+  // 1.5 s later: dropped when nothing changed between the two clicks, or when
+  // this click itself changed nothing (no DOM change, same address, checked
+  // state, value and focus), and the screenshots agree. Clicks and
+  // double-clicks are each compared with their own kind.
+
+  let run = null; // the last click: { el, id, kind, snapshot, changed, ids }
+  let held = null; // the click being held: { ...run fields, prev, idleBefore, timer }
+  const observer = new MutationObserver((records) => {
+    if (run && records.some((r) => r.target !== widget?.host)) run.changed = true;
+  });
+  function watchPage(on) {
+    if (on) observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    else observer.disconnect();
+    run = null;
+    if (held) clearTimeout(held.timer);
+    held = null;
+  }
+  const snapshotOf = (el) => ({ url: location.href, checked: el.checked, value: el.value, active: document.activeElement });
+  // Whether nothing on the page changed since the click `rec`.
+  function unchangedSince(rec) {
+    if (!rec || rec.changed) return false;
+    const el = rec.el;
+    const a = rec.snapshot;
+    const b = snapshotOf(el);
+    // A click may focus the element itself; that isn't a change.
+    const focusSame = a.active === b.active || b.active === el || el.contains?.(b.active);
+    return a.url === b.url && a.checked === b.checked && a.value === b.value && focusSame;
+  }
+  // What the background needs to decide the held click; `gone` when the page is going away.
+  function takeSettle({ gone = false } = {}) {
+    const h = held;
+    if (!h) return null;
+    held = null;
+    clearTimeout(h.timer);
+    return { id: h.id, prevIds: h.ids, sameKind: h.kind === h.prev.kind, idleBefore: h.idleBefore, idleAfter: !gone && unchangedSince(h) };
+  }
+  // Settles the held click on its own, with a screenshot taken now.
+  async function settleNow(opts) {
+    const settle = takeSettle(opts);
+    if (!settle || !recording()) return;
+    if (opts?.gone) return send({ type: 'steps', steps: [], settle, capture: false }); // no frame to wait for
+    await postSteps({ steps: [], settle, capture: true }, { hide: true });
+  }
+  function holdTimer(h) {
+    clearTimeout(h.timer);
+    h.timer = setTimeout(() => held === h && settleNow(), 1500);
   }
 
   // ---------- clicks, keys, selects ----------
@@ -211,9 +281,11 @@
     // A second press on the same element right away is a double-click.
     if (lastClick && lastClick.el === el && Date.now() - lastClick.at < 450) {
       const label = labelOf(el);
-      sendSteps([{ id: lastClick.id, text: label ? `Double-click **${label}**` : 'Double-click here' }], {
+      sendSteps([{ id: lastClick.id, action: 'dblclick', relabel: true, text: label ? `Double-click **${label}**` : 'Double-click here' }], {
         capture: false,
       });
+      if (run?.id === lastClick.id) run.kind = 'dblclick';
+      if (held?.id === lastClick.id) holdTimer(held); // judged as a double-click, from now
       lastClick = null;
       return;
     }
@@ -223,19 +295,33 @@
     // Clicking a field you're already typing in isn't a new step.
     if (!pending && isTextField(el) && el === document.activeElement) return;
 
+    const settle = takeSettle(); // this click's screenshot shows what a held click did
     const id = crypto.randomUUID();
     lastClick = { el, at: Date.now(), id };
     // A label wrapping a checkbox reads better as the checkbox itself.
     const subject = el.tagName === 'LABEL' && el.control ? el.control : el;
-    sendSteps([
-      pending,
-      baseStep(el, {
-        id,
-        action: 'click',
-        text: describeClick(subject),
-        click: { x: event.clientX, y: event.clientY },
-      }),
-    ]);
+    const prev = run;
+    const again = !pending && prev?.el === subject;
+    const rec = { el: subject, id, kind: 'click', snapshot: snapshotOf(subject), changed: false, ids: again ? [...prev.ids, prev.id] : [] };
+    if (again) {
+      Object.assign(rec, { prev, idleBefore: unchangedSince(prev) });
+      held = rec;
+      holdTimer(rec);
+    }
+    run = rec;
+    sendSteps(
+      [
+        pending,
+        baseStep(el, {
+          id,
+          action: 'click',
+          text: describeClick(subject),
+          click: { x: event.clientX, y: event.clientY },
+          ...(again ? { hold: true } : {}),
+        }),
+      ],
+      { settle },
+    );
   }
 
   function onKeyDown(event) {
@@ -254,24 +340,31 @@
     }
     const pending = takeDraft();
     draft = null;
+    const settle = takeSettle();
+    run = null;
     const target = el?.nodeType === 1 ? el : document.activeElement || document.body;
-    sendSteps([pending, baseStep(target, { action: 'key', key: event.key, text: `Press **${keyName}**` })]);
+    sendSteps([pending, baseStep(target, { action: 'key', key: event.key, text: `Press **${keyName}**` })], { settle });
   }
 
   function onChange(event) {
     if (!recording() || !event.isTrusted) return;
     const el = event.composedPath()[0];
     if (el?.tagName !== 'SELECT') return;
+    const settle = takeSettle();
+    run = null;
     const chosen = clean([...el.selectedOptions].map((o) => o.text).join(', '));
     const label = labelOf(el);
-    sendSteps([
-      baseStep(el, {
-        action: 'select',
-        value: chosen,
-        label,
-        text: `Select **${chosen || 'an option'}**${label ? ` from **${label}**` : ''}`,
-      }),
-    ]);
+    sendSteps(
+      [
+        baseStep(el, {
+          action: 'select',
+          value: chosen,
+          label,
+          text: `Select **${chosen || 'an option'}**${label ? ` from **${label}**` : ''}`,
+        }),
+      ],
+      { settle },
+    );
   }
 
   function onFocusOut(event) {
@@ -286,6 +379,7 @@
   window.addEventListener('change', onChange, true);
   window.addEventListener('focusout', onFocusOut, true);
   window.addEventListener('pagehide', () => {
+    settleNow({ gone: true }); // leaving the page: the held click did something
     const pending = takeDraft();
     if (pending) sendSteps([pending], { capture: false });
   });
@@ -330,8 +424,15 @@
         <button class="done" title="Stop and build the guide">${ICONS.check}<span>Done</span></button>
       </div>`;
     const $ = (s) => root.querySelector(s);
-    $('.toggle').addEventListener('click', () => send({ type: state.paused ? 'resume' : 'pause' }).then(applyState));
-    $('.done').addEventListener('click', () => send({ type: 'stop' }).then(applyState));
+    // A click still being held is decided before pausing or stopping.
+    $('.toggle').addEventListener('click', async () => {
+      if (!state.paused) await settleNow();
+      send({ type: state.paused ? 'resume' : 'pause' }).then(applyState);
+    });
+    $('.done').addEventListener('click', async () => {
+      await settleNow();
+      send({ type: 'stop' }).then(applyState);
+    });
     $('.discard').addEventListener('click', () => {
       if (confirm('Discard this recording? The captured steps will be deleted.')) send({ type: 'discard' }).then(applyState);
     });
@@ -351,7 +452,9 @@
 
   function applyState(next) {
     if (!next || next.error || typeof next.active !== 'boolean') return;
+    const wasRecording = recording();
     state = next;
+    if (recording() !== wasRecording) watchPage(recording());
     if (state.active) {
       mountWidget();
       renderWidget();

@@ -31,7 +31,7 @@ Everything runs on your computer. There is no account and no server. The only da
 
 ![Start a capture dialog](docs/screenshots/new-capture.png)
 
-**Inside a guide**: edit steps, then use the toolbar to Improve with AI, Translate, Continue capturing, toggle Highlights, Copy text, Print, save to Notion, or Export.
+**Inside a guide**: edit steps, then use the toolbar to Improve with AI, Translate, Continue capturing, toggle Highlights, Copy (as text or Markdown), Print, save to Notion, or Export.
 
 ![A guide open in the editor with its toolbar](docs/screenshots/guide-editor.png)
 
@@ -157,8 +157,8 @@ npm run dist:win
 
 The first build downloads the packaging tools (about 150 MB) and takes a few minutes. Later builds are faster. The build runs in a temporary folder, and the finished files are copied into `FlowDoc/dist/`:
 
-- `FlowDoc Setup 1.0.0.exe`: an installer that adds Start-menu and desktop shortcuts. Double-click it and follow the wizard.
-- `FlowDoc 1.0.0.exe`: a portable version that runs without installing.
+- `FlowDoc Setup 1.1.0.exe`: an installer that adds Start-menu and desktop shortcuts. Double-click it and follow the wizard.
+- `FlowDoc 1.1.0.exe`: a portable version that runs without installing.
 
 The app isn't code-signed, so Windows SmartScreen may show **"Windows protected your PC"**. Click **More info → Run anyway**.
 
@@ -170,8 +170,8 @@ npm run dist:linux
 
 This creates two files in `dist/`:
 
-- `FlowDoc-1.0.0.AppImage`: make it executable with `chmod +x FlowDoc-1.0.0.AppImage`, then double-click it or run it from a terminal.
-- `flowdoc_1.0.0_amd64.deb` (Debian/Ubuntu): install it with `sudo apt install ./flowdoc_1.0.0_amd64.deb`. This also installs the required system packages.
+- `FlowDoc-1.1.0.AppImage`: make it executable with `chmod +x FlowDoc-1.1.0.AppImage`, then double-click it or run it from a terminal.
+- `flowdoc_1.1.0_amd64.deb` (Debian/Ubuntu): install it with `sudo apt install ./flowdoc_1.1.0_amd64.deb`. This also installs the required system packages.
 
 #### Linux: one-time setup
 
@@ -249,6 +249,9 @@ Do this before your first capture on Linux:
 | Press Enter / Esc / Delete / F2… | Press **Enter** |
 | Keyboard shortcut | Press **Ctrl+S**, Press **Win+E** |
 | Press the Windows / Super key alone | Press **Windows key** |
+| Switch browser tabs (click a tab, `Ctrl+Tab`, `Ctrl+1`…), or type an address and press Enter | Navigate to **https://github.com/avin045/FlowDoc** *(with a screenshot of that page)* |
+
+**Browser tabs (Windows):** in Chrome, Edge, Brave, Vivaldi, Opera and Firefox, FlowDoc reads the page's link from the address bar, so switching to another tab writes **Navigate to** with that link instead of "Open the … tab". Switching to the page the guide is already on adds nothing. On Linux FlowDoc can't read the link, so a tab click stays an ordinary click step.
 
 Under each step the editor shows which app and window it happened in, for example "File Explorer · Downloads".
 
@@ -257,7 +260,7 @@ Element names come from the operating system's accessibility features: UI Automa
 ### A4. Privacy while recording
 
 - **Passwords:** password fields are detected and their contents are never saved.
-- **The recorder bar** never appears in FlowDoc's screenshots. On Windows it is hidden from all screen captures by default; if you make it visible to other apps ([A7](#a7-capture-settings)), or on Linux, FlowDoc blurs it out of each step's screenshot instead (you can remove the blur in the screenshot editor).
+- **The recorder bar** never appears in FlowDoc's screenshots. On Windows it is hidden from all screen captures by default. If you make it visible to other apps ([A7](#a7-capture-settings)), FlowDoc still leaves it out of its own screenshots: at each step it hides the bar from captures for a moment (about a fifth of a second) and fills in what is behind it, so people watching may see the bar blink once per step. On Linux, where windows can't be hidden from captures, FlowDoc blurs the bar out of each step's screenshot instead (you can remove the blur in the screenshot editor).
 - **Clicks inside FlowDoc's own windows** are ignored.
 - **Screenshots:** if one shows something private, blur it afterwards with the screenshot editor ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
 - **Typed text:** to keep it out of guides entirely, untick **Settings → Capture → Include typed text in steps**.
@@ -364,9 +367,10 @@ Open **Settings → Capture**:
 | Setting | What it does |
 | --- | --- |
 | Minimise FlowDoc while capturing | Gets FlowDoc out of the way when a capture starts (on by default). |
-| Hide the recorder bar from screen recordings and meetings | On by default: screen recorders and meeting apps (Teams, Zoom, Meet, OBS…) don't see the bar or the red area border. Untick it when you are recording a video or sharing your screen and want viewers to see the bar too. Either way, clicks on the bar are never steps, and FlowDoc blurs the bar out of its own screenshots. Linux can't hide windows from captures, so there the bar is always visible to other apps and the box is greyed out. |
+| Hide the recorder bar from screen recordings and meetings | On by default: screen recorders and meeting apps (Teams, Zoom, Meet, OBS…) don't see the bar or the red area border. Untick it when you are recording a video or sharing your screen and want viewers to see the bar too. Either way, clicks on the bar are never steps, and the bar stays out of FlowDoc's own screenshots (with the box unticked, viewers see the bar blink briefly at each step while FlowDoc takes its shot). Linux can't hide windows from captures, so there the bar is always visible to other apps and the box is greyed out. |
 | Include typed text in steps | Shows what you typed, for example Type "Q3 report"… Passwords are always hidden. |
 | Also include keystrokes when the field type can't be detected | For apps that don't report their text fields. Off by default, because FlowDoc can't tell whether such a field holds a password. |
+| Ignore repeated clicks that change nothing | On by default. Clicking the same thing again (waiting for a slow app, or unsure the click worked) doesn't add another step when that click changed nothing. FlowDoc holds a repeated click for a moment and compares the app's window before it with the screen at your next action (or 1.5 seconds later). It also drops the click when nothing changed since the previous click. Any visible change, even a number going from 1 to 2, keeps the step. Clicks, double-clicks and right-clicks are each compared with the same kind, so a click followed by a double-click stays two steps. The extension has the same setting. |
 
 ### A8. Where your guides are stored
 
@@ -470,6 +474,7 @@ You can also start a capture from the workspace. Click **New capture** in the le
 | You do | Step written |
 | --- | --- |
 | Start a capture, or type a URL in the address bar | Navigate to **example.com** |
+| Switch to another tab or browser window | Navigate to **https://github.com/avin045/FlowDoc** *(the tab's link, with a screenshot)* |
 | Click a button, link, tab or menu item | Click **Sign in** |
 | Click a text field | Click the **Email** field |
 | Type into a field | Type "jordan@acme.com" in the **Email** field |
@@ -480,6 +485,8 @@ You can also start a capture from the workspace. Click **New capture** in the le
 | Double-click | Double-click **Report.xlsx** |
 
 Each step gets a screenshot. The element you clicked is outlined and the click point is marked with a dot.
+
+**Repeated clicks:** clicking or double-clicking the same element again isn't a new step when that click changed nothing on the page (or nothing had changed since the click before). To record every click, untick **Settings → Capture → Ignore repeated clicks that change nothing** in the workspace.
 
 ### B4. Find your guides again
 
@@ -602,7 +609,10 @@ Other ways to share:
 - **Print:** opens a print-ready version. Choose **Save as PDF** as the printer to get a PDF with selectable text in any script.
 
 **Other languages in PDF:** the built-in PDF export writes Latin text as real, selectable text. When a guide is in another script (Tamil, Hindi, Arabic, Chinese…), FlowDoc draws that text with your system's fonts and places it in the PDF as sharp images, so it always shows correctly but can't be selected or searched. For selectable text in those scripts, use **Print → Save as PDF**. On Linux, install Noto fonts (for example `fonts-noto-core`) so every script has a font.
-- **Copy text:** copies the numbered steps as plain text, ready to paste into chat or email.
+- **Copy:** choose how to copy the whole guide to the clipboard:
+  - **Text**: the numbered steps as plain text, ready to paste into chat or email.
+  - **Markdown with images**: headings, steps, links and the screenshots, with the images embedded in the text itself. One paste into Obsidian, Typora, Joplin, VS Code and other Markdown editors brings everything along. Each screenshot adds roughly 50–100 KB of text to the note.
+  - **Markdown without images**: the same Markdown, steps only. Small, for notes, wikis and Git.
 
 ### C6. Try it without recording
 

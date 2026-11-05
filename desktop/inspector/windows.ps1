@@ -4,7 +4,8 @@
 #   {"id":1,"op":"point","x":100,"y":200}   physical screen pixels
 #   {"id":2,"op":"focus"}
 #   {"id":3,"op":"windows"}                  open top-level windows, front to back
-#   {"id":4,"op":"ping"}
+#   {"id":4,"op":"url","hwnd":123}           address shown in that (or the foreground) browser window
+#   {"id":5,"op":"ping"}
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -32,6 +33,8 @@ public static class FlowDocWin {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  public static long Foreground() { return GetForegroundWindow().ToInt64(); }
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
   [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
@@ -174,6 +177,7 @@ function Describe($el) {
   if ($hwnd) {
     try {
       $top = [FlowDocWin]::Top([long]$hwnd)
+      $o.hwnd = $top.Hwnd
       $topApp = Get-AppName $top.Pid
       $o.topExe = $topApp.exe
       $o.topApp = $topApp.name
@@ -199,6 +203,24 @@ function List-Windows {
   return ,$out
 }
 
+# The address bar of the foreground browser window: Chromium browsers (Chrome,
+# Edge, Brave, Vivaldi, Opera) call it OmniboxViewViews, Firefox urlbar-input.
+$urlBar = New-Object System.Windows.Automation.OrCondition(
+  (New-Object System.Windows.Automation.PropertyCondition($AE::ClassNameProperty, 'OmniboxViewViews')),
+  (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, 'urlbar-input')))
+
+# `hwnd`: the browser window acted on; the foreground window when not given.
+function Get-BrowserUrl([long]$hwnd) {
+  $h = if ($hwnd) { $hwnd } else { [FlowDocWin]::Foreground() }
+  if ($h -eq 0) { return $null }
+  $root = $AE::FromHandle([IntPtr]$h)
+  $bar = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $urlBar)
+  if ($null -eq $bar) { return $null }
+  $value = $bar.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+  $app = Get-AppName $root.Current.ProcessId
+  return [ordered]@{ url = $value; title = $root.Current.Name; exe = $app.exe; app = $app.name }
+}
+
 while ($true) {
   $line = [Console]::In.ReadLine()
   if ($null -eq $line) { break }
@@ -211,6 +233,7 @@ while ($true) {
       'point' { $res.el = Describe ($AE::FromPoint((New-Object System.Windows.Point([double]$req.x, [double]$req.y)))) }
       'focus' { $res.el = Describe ($AE::FocusedElement) }
       'windows' { $res.el = List-Windows }
+      'url'   { $res.el = Get-BrowserUrl ([long]$req.hwnd) }
       'ping'  { $res.ok = $true }
       default { $res.error = "unknown op $($req.op)" }
     }

@@ -6,6 +6,9 @@ import { AI_PROVIDERS, complete, listModels } from '../shared/aiClient.js';
 
 const SETTINGS_KEY = 'flowdoc_ai_settings';
 const KEYS_KEY = 'flowdoc_ai_keys';
+// The extension's capture settings; background.js reads them while recording.
+const CAPTURE_KEY = 'flowdoc_capture';
+const CAPTURE_DEFAULTS = { ignoreRepeats: true };
 
 const DEFAULTS = {
   provider: 'off',
@@ -27,20 +30,24 @@ function merge(into, patch) {
 function extensionHost() {
   const store = chrome.storage.local;
   async function read() {
-    const got = await store.get([SETTINGS_KEY, KEYS_KEY]);
-    return { ai: merge(structuredClone(DEFAULTS), got[SETTINGS_KEY]), keys: got[KEYS_KEY] || {} };
+    const got = await store.get([SETTINGS_KEY, KEYS_KEY, CAPTURE_KEY]);
+    return {
+      ai: merge(structuredClone(DEFAULTS), got[SETTINGS_KEY]),
+      keys: got[KEYS_KEY] || {},
+      capture: merge(structuredClone(CAPTURE_DEFAULTS), got[CAPTURE_KEY]),
+    };
   }
   async function getPublic() {
-    const { ai, keys } = await read();
-    return { ai, keys: Object.fromEntries(Object.keys(AI_PROVIDERS).map((p) => [p, !!keys[p]])), providers: AI_PROVIDERS, secureStorage: false };
+    const { ai, keys, capture } = await read();
+    return { ai, capture, keys: Object.fromEntries(Object.keys(AI_PROVIDERS).map((p) => [p, !!keys[p]])), providers: AI_PROVIDERS, secureStorage: false };
   }
   return {
     kind: 'extension',
     settings: {
       get: getPublic,
       async update(patch) {
-        const { ai } = await read();
-        await store.set({ [SETTINGS_KEY]: merge(ai, patch?.ai) });
+        const { ai, capture } = await read();
+        await store.set({ [SETTINGS_KEY]: merge(ai, patch?.ai), [CAPTURE_KEY]: merge(capture, patch?.capture) });
         return getPublic();
       },
       async setKey(provider, apiKey) {

@@ -4,6 +4,7 @@
 import { createGuide, defaultTitle, deleteGuide, getGuide, saveGuide } from './shared/guides.js';
 
 const STATE_KEY = 'recordingState';
+const CAPTURE_KEY = 'flowdoc_capture'; // capture settings, written by the workspace's Settings
 const IDLE = { active: false, paused: false, guideId: null, stepCount: 0 };
 
 // ---------- serialisation helpers ----------
@@ -100,17 +101,148 @@ function buildStep(raw, shot, page) {
   };
 }
 
-async function addSteps(rawSteps, { windowId, page, capture: wantCapture = true }) {
+// ---------- repeated clicks ----------
+
+// Whether two screenshots differ. Strict on purpose: a few dozen changed
+// pixels (a counter going from 1 to 2) count, so only identical screens match.
+async function shotsDiffer(a, b) {
+  const [ia, ib] = await Promise.all([a, b].map(async (url) => createImageBitmap(await (await fetch(url)).blob())));
+  try {
+    if (ia.width !== ib.width || ia.height !== ib.height) return true;
+    const pixels = (img) => {
+      const c = new OffscreenCanvas(img.width, img.height);
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      return g.getImageData(0, 0, img.width, img.height).data;
+    };
+    const pa = pixels(ia);
+    const pb = pixels(ib);
+    let changed = 0;
+    for (let i = 0; i < pa.length; i += 4) {
+      if (Math.abs(pa[i] - pb[i]) + Math.abs(pa[i + 1] - pb[i + 1]) + Math.abs(pa[i + 2] - pb[i + 2]) > 48 && ++changed > 40) return true;
+    }
+    return false;
+  } finally {
+    ia.close();
+    ib.close();
+  }
+}
+
+const sameShots = async (a, b) => {
+  if (!a || !b) return false;
+  try {
+    return !(await shotsDiffer(a, b));
+  } catch (err) {
+    console.warn('[FlowDoc] repeat check failed:', err?.message || err);
+    return false;
+  }
+};
+
+// A click on the same element as the click before it comes `hold`: its
+// screenshot is kept here, and the page settles it at its next action (or
+// 1.5 s later) with what it saw. It is dropped when the page saw no change
+// between the two clicks and the screenshots agree, or when the page saw no
+// change after it and neither did the screen. Only ever held briefly.
+// Settings > Capture > "Ignore repeated clicks that change nothing".
+const held = new Map(); // id -> { raw, shot, page, timer }
+
+async function ignoringRepeats() {
+  const { [CAPTURE_KEY]: settings } = await chrome.storage.local.get(CAPTURE_KEY);
+  return settings?.ignoreRepeats !== false;
+}
+
+function hold(raw, shot, page) {
+  const id = raw.id;
+  // If the page never settles it (it closed, say), the click is kept.
+  const timer = setTimeout(() => {
+    if (!held.has(id)) return;
+    enqueue(async () => {
+      const state = await getState();
+      const guide = state.active && (await getGuide(state.guideId));
+      if (!guide || !commitHeld(guide)) return;
+      await saveGuide(guide);
+      await setState({ ...state, stepCount: guide.steps.filter((s) => s.kind === 'action').length });
+    });
+  }, 6000);
+  held.set(id, { raw: { createdAt: Date.now(), ...raw }, shot, page, timer });
+}
+
+// Keeps every held click (in the queue, with `guide` loaded). Whether any were.
+function commitHeld(guide) {
+  const any = held.size > 0;
+  for (const h of held.values()) {
+    clearTimeout(h.timer);
+    guide.steps.push(buildStep(h.raw, h.shot, h.page));
+  }
+  held.clear();
+  return any;
+}
+
+// Decides one held click; `after` is a screenshot taken at the next action.
+async function settleHeld(guide, settle, after) {
+  const h = held.get(settle.id);
+  if (!h) return null;
+  held.delete(settle.id);
+  clearTimeout(h.timer);
+  if (settle.sameKind && h.shot) {
+    const last = guide.steps.at(-1);
+    if (settle.idleBefore && settle.prevIds?.includes(last?.id) && (await sameShots(last.screenshot, h.shot.dataUrl))) return 'dropped';
+    if (settle.idleAfter && after && (await sameShots(h.shot.dataUrl, after.dataUrl))) return 'dropped';
+  }
+  guide.steps.push(buildStep(h.raw, h.shot, h.page));
+  return 'kept';
+}
+
+// Step messages reach the write queue in the order they arrived, even when an
+// earlier one is still waiting for its screenshot (a double-click's second
+// press must come after its first).
+let arrival = Promise.resolve();
+
+async function addSteps(rawSteps, opts) {
+  const prior = arrival;
+  let release;
+  arrival = new Promise((r) => (release = r));
+  try {
+    return await addStepsInTurn(rawSteps, opts, prior);
+  } finally {
+    release();
+  }
+}
+
+async function addStepsInTurn(rawSteps, { windowId, page, capture: wantCapture = true, settle = null }, prior) {
   const state = await getState();
   if (!state.active || state.paused) return state;
   const shot = wantCapture ? await capture(windowId) : null;
+  const holding = rawSteps.some((r) => r.hold) && (await ignoringRepeats());
+  await prior;
   return enqueue(async () => {
     const current = await getState();
     if (!current.active || current.guideId !== state.guideId) return current;
     const guide = await getGuide(current.guideId);
     if (!guide) return current;
-    for (const raw of rawSteps) {
+    const dropped = [];
+    let changed = false;
+    if (settle) {
+      const result = await settleHeld(guide, settle, shot);
+      if (result === 'dropped') dropped.push(settle.id);
+      changed = result === 'kept';
+    }
+    // Any other new step comes after clicks still held (from another tab, say).
+    if (rawSteps.some((r) => !r.relabel) && commitHeld(guide)) changed = true;
+    for (const { hold: wantsHold, relabel, ...raw } of rawSteps) {
+      if (wantsHold && holding && shot) {
+        hold(raw, shot, page);
+        continue;
+      }
+      const waiting = raw.id && held.get(raw.id);
+      if (waiting) {
+        Object.assign(waiting.raw, raw); // a held click became a double-click
+        continue;
+      }
       const existing = raw.id && guide.steps.find((s) => s.id === raw.id);
+      // A double-click on a click that was dropped as a repeat: nothing to relabel.
+      if (!existing && relabel) continue;
+      changed = true;
       if (existing) {
         // Upsert: typing drafts and double-clicks refine a step already captured.
         Object.assign(existing, raw);
@@ -122,9 +254,10 @@ async function addSteps(rawSteps, { windowId, page, capture: wantCapture = true 
         guide.steps.push(buildStep({ id: raw.id || crypto.randomUUID(), ...raw }, shot, page));
       }
     }
+    if (!changed) return { ...current, dropped };
     await saveGuide(guide);
     const stepCount = guide.steps.filter((s) => s.kind === 'action').length;
-    return setState({ ...current, stepCount });
+    return { ...(await setState({ ...current, stepCount })), dropped };
   });
 }
 
@@ -173,6 +306,7 @@ async function stop({ open = true } = {}) {
   await enqueue(async () => {
     const guide = await getGuide(state.guideId);
     if (!guide) return;
+    commitHeld(guide); // stopped from the toolbar or shortcut while a click was held
     delete guide.recording;
     if (!guide.title) guide.title = defaultTitle(guide);
     await saveGuide(guide);
@@ -186,6 +320,8 @@ async function discard() {
   const state = await getState();
   if (!state.active) return state;
   await enqueue(async () => {
+    for (const h of held.values()) clearTimeout(h.timer);
+    held.clear();
     if (!state.keepIds) return deleteGuide(state.guideId);
     // A continued guide keeps the steps it had before this capture.
     const guide = await getGuide(state.guideId);
@@ -230,6 +366,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           windowId: sender.tab.windowId,
           page: msg.page,
           capture: msg.capture !== false,
+          settle: msg.settle || null,
         });
       default:
         return null;
@@ -266,6 +403,45 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     windowId: tab.windowId,
     page: { url: tab.url, title: tab.title },
   });
+});
+
+// Switching to another tab (or browser window) becomes a "Navigate to" step
+// with that page's link, unless the guide's last step is already on that page.
+function loadedTab(tabId) {
+  return new Promise((resolve) => {
+    const done = (tab) => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(tab);
+    };
+    const listener = (id, change, tab) => id === tabId && change.status === 'complete' && done(tab);
+    const timer = setTimeout(() => chrome.tabs.get(tabId).then(done, () => done(null)), 8000);
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function tabSwitched(tabId) {
+  if (!(await getState()).active) return;
+  let tab = await chrome.tabs.get(tabId).catch(() => null);
+  // A new, empty tab: the address typed into it becomes the step (see below).
+  if (!/^(https?|file):/.test(tab?.pendingUrl || tab?.url || '')) return;
+  if (tab.status === 'loading') tab = await loadedTab(tabId);
+  const state = await getState();
+  if (!state.active || state.paused || !tab?.active || !/^(https?|file):/.test(tab.url || '')) return;
+  const guide = await getGuide(state.guideId);
+  if (guide?.steps.findLast((s) => s.url)?.url === tab.url) return;
+  await new Promise((r) => setTimeout(r, 300)); // let the tab paint before the screenshot
+  await addSteps([{ action: 'navigate', text: `Navigate to **${tab.url}**`, href: tab.url }], {
+    windowId: tab.windowId,
+    page: { url: tab.url, title: tab.title },
+  });
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => tabSwitched(tabId));
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  const [tab] = await chrome.tabs.query({ active: true, windowId }).catch(() => []);
+  if (tab) tabSwitched(tab.id);
 });
 
 chrome.runtime.onStartup.addListener(async () => {

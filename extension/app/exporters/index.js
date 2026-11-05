@@ -1,7 +1,7 @@
 import { buildExportModel, fileSafe, plainText } from '../render.js';
 import { exportDocx } from './docx.js';
 import { exportHtml, guideToHtml } from './html.js';
-import { exportMarkdown } from './markdown.js';
+import { exportMarkdown, guideToMarkdown } from './markdown.js';
 import { exportPdf } from './pdf.js';
 
 export const FORMATS = [
@@ -56,6 +56,13 @@ export function guideToPlainText(guide) {
     else lines.push(plainText(s.text));
   }
   return lines.join('\n');
+}
+
+// Markdown for the clipboard. With `images`, the screenshots are embedded in
+// the text, so one paste brings them along.
+export async function guideToClipboardMarkdown(guide, { images }) {
+  const model = await buildExportModel(guide, { images });
+  return guideToMarkdown(model, { imagePath: (b) => b.image.dataUrl });
 }
 
 export function parseImport(text) {

@@ -141,6 +141,14 @@ export function createInspector({ timeout = 1500, log = () => {} } = {}) {
       const list = available === false ? null : await call('windows', {}, 5000);
       return Array.isArray(list) ? list : [];
     },
+    // A browser window's address bar: { url, title, exe, app }. `hwnd`
+    // is the window (an element's `hwnd`), else the foreground window.
+    // Windows only; elsewhere, or for other apps, null.
+    async browserUrl(hwnd) {
+      if (process.platform !== 'win32' || available === false) return null;
+      const info = await call('url', hwnd ? { hwnd } : {}, 2500);
+      return info?.url ? info : null;
+    },
     stop() {
       if (child) {
         child.stdin.end();
