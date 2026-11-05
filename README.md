@@ -157,8 +157,8 @@ npm run dist:win
 
 The first build downloads the packaging tools (about 150 MB) and takes a few minutes. Later builds are faster. The build runs in a temporary folder, and the finished files are copied into `FlowDoc/dist/`:
 
-- `FlowDoc Setup 1.1.0.exe`: an installer that adds Start-menu and desktop shortcuts. Double-click it and follow the wizard.
-- `FlowDoc 1.1.0.exe`: a portable version that runs without installing.
+- `FlowDoc Setup 1.1.1.exe`: an installer that adds Start-menu and desktop shortcuts. Double-click it and follow the wizard.
+- `FlowDoc 1.1.1.exe`: a portable version that runs without installing.
 
 The app isn't code-signed, so Windows SmartScreen may show **"Windows protected your PC"**. Click **More info → Run anyway**.
 
@@ -170,8 +170,8 @@ npm run dist:linux
 
 This creates two files in `dist/`:
 
-- `FlowDoc-1.1.0.AppImage`: make it executable with `chmod +x FlowDoc-1.1.0.AppImage`, then double-click it or run it from a terminal.
-- `flowdoc_1.1.0_amd64.deb` (Debian/Ubuntu): install it with `sudo apt install ./flowdoc_1.1.0_amd64.deb`. This also installs the required system packages.
+- `FlowDoc-1.1.1.AppImage`: make it executable with `chmod +x FlowDoc-1.1.1.AppImage`, then double-click it or run it from a terminal.
+- `flowdoc_1.1.1_amd64.deb` (Debian/Ubuntu): install it with `sudo apt install ./flowdoc_1.1.1_amd64.deb`. This also installs the required system packages.
 
 #### Linux: one-time setup
 
