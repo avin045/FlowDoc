@@ -39,7 +39,7 @@ Everything runs on your computer. There is no account and no server. The only da
 
 ![Export guide dialog](docs/screenshots/export.png)
 
-**Settings**: guides folder, optional AI assistant (Gemini or Groq), optional Notion, click highlight style and capture options.
+**Settings**: a sidebar of sections. **General** (click highlight style), **Capture** (capture options), **Storage** (guides folder), **AI** (optional assistant, Gemini or Groq) and **Integrations** (optional Notion).
 
 | | |
 | --- | --- |
@@ -280,7 +280,7 @@ The AI assistant turns recorded steps into polished instructions by looking at e
 
 **Step 2: Connect it to FlowDoc.**
 
-1. In FlowDoc, click **Settings** (gear icon) at the bottom of the left sidebar.
+1. In FlowDoc, click **Settings** (gear icon) at the bottom of the left sidebar, then **AI** in the Settings sidebar.
 2. Under **AI assistant**, set **Provider** to **Google Gemini** or **Groq**.
 3. Paste your key into **API key** and click **Save key**. The box changes to "Saved…".
 4. Leave **Model** at the default (`gemini-3.6-flash` for Gemini, `qwen/qwen3.8-27b` for Groq), or click **Load models**. The dropdown then lists every model your key can use that writes text, grouped as **Recommended** and **All models for your key**. Speech, image, embedding and transcription models are left out. To use a model that isn't listed, pick **Other — type a model ID…**. The list is remembered between sessions.
@@ -334,7 +334,7 @@ FlowDoc can turn a guide into a Notion page, with every screenshot uploaded, und
 
 **Step 2: Connect it to FlowDoc.**
 
-1. Click **Settings** in FlowDoc's sidebar. Under **Notion**, paste the secret into **Secret** and click **Save**.
+1. Click **Settings** in FlowDoc's sidebar, then **Integrations**. Under **Notion**, paste the secret into **Secret** and click **Save**.
 2. **Test connection** shows your workspace name and how many pages FlowDoc can see.
 3. You can also do this from the **Notion** button the first time you use it.
 
@@ -370,7 +370,7 @@ Open **Settings → Capture**:
 | Hide the recorder bar from screen recordings and meetings | On by default: screen recorders and meeting apps (Teams, Zoom, Meet, OBS…) don't see the bar or the red area border. Untick it when you are recording a video or sharing your screen and want viewers to see the bar too. Either way, clicks on the bar are never steps, and the bar stays out of FlowDoc's own screenshots (with the box unticked, viewers see the bar blink briefly at each step while FlowDoc takes its shot). Linux can't hide windows from captures, so there the bar is always visible to other apps and the box is greyed out. |
 | Include typed text in steps | Shows what you typed, for example Type "Q3 report"… Passwords are always hidden. |
 | Also include keystrokes when the field type can't be detected | For apps that don't report their text fields. Off by default, because FlowDoc can't tell whether such a field holds a password. |
-| Ignore repeated clicks that change nothing | On by default. Clicking the same thing again (waiting for a slow app, or unsure the click worked) doesn't add another step when that click changed nothing. FlowDoc holds a repeated click for a moment and compares the app's window before it with the screen at your next action (or 1.5 seconds later). It also drops the click when nothing changed since the previous click. Any visible change, even a number going from 1 to 2, keeps the step. Clicks, double-clicks and right-clicks are each compared with the same kind, so a click followed by a double-click stays two steps. The extension has the same setting. |
+| Ignore repeated clicks that change nothing | On by default. Clicking the same thing again (waiting for a slow app, or unsure the click worked) doesn't add another step when that click changed nothing. FlowDoc holds a repeated click for a moment and compares the app's window before it with the screen at your next action (or 1.5 seconds later). It also drops the click when nothing changed since the previous click. Any visible change, even a number going from 1 to 2, keeps the step. What comes and goes with the mouse pointer doesn't count: the pointer itself, and tooltips or bubbles that pop up just below it (such as Chrome's **Define** after double-clicking a word). Double-clicking the same word again also doesn't count, even if this time the space after it gets selected too. Clicks, double-clicks and right-clicks are each compared with the same kind, so a click followed by a double-click stays two steps. The extension has the same setting. |
 
 ### A8. Where your guides are stored
 
@@ -390,7 +390,7 @@ To move guides to another computer, use **Export → Backup (.json)** and **Impo
 
 You can keep your guides anywhere on your computer, for example `C:\Users\you\Documents\FlowDoc` or a folder on another drive. If you never change it, FlowDoc uses the default folder above.
 
-1. Click **Settings** in the sidebar. The **Guides folder** section shows where guides are stored now, marked **Default** or **Custom**.
+1. Click **Settings** in the sidebar, then **Storage**. The **Guides folder** section shows where guides are stored now, marked **Default** or **Custom**.
 2. Click **Change folder…** and pick (or create) a folder.
    - An empty folder, or one that already holds FlowDoc guides, is used as it is.
    - If the folder already contains other files, FlowDoc creates a **FlowDoc Guides** folder inside it, so its files don't mix with yours.
@@ -414,12 +414,12 @@ Your settings, API keys and Notion secret always stay in the app's data folder; 
 | A screenshot is black | The app blocks screen capture. This is common with video streaming services and some banking apps, and nothing can be done from FlowDoc. |
 | SmartScreen blocks the installer | Click **More info → Run anyway**. The app isn't code-signed. |
 | `Alt+Shift+R` doesn't work | Another program owns that shortcut. Use the **New capture** button or the tray menu instead. |
-| AI: "401" or "API key not valid" | Paste the key again in **Settings → API key** and click **Save key**. Make sure the provider matches the key. |
+| AI: "401" or "API key not valid" | Paste the key again in **Settings → AI → API key** and click **Save key**. Make sure the provider matches the key. |
 | AI: "404" or "model not found" | Click **Load models** and choose a model from the list. |
 | AI: "429" or "rate limit" | You've hit the free-tier limit. Wait a minute and try again, or use a smaller guide. |
-| AI is slow | The model is probably overloaded at Google or Groq. The job keeps running in the background, so click **Keep working** and carry on. For speed, use **Crisp** (text only), or pick `gemini-3.6-flash` (the default) in **Settings → Model**. Large "pro" or reasoning-only models are much slower. **Test connection** shows which model answers and how fast. |
+| AI is slow | The model is probably overloaded at Google or Groq. The job keeps running in the background, so click **Keep working** and carry on. For speed, use **Crisp** (text only), or pick `gemini-3.6-flash` (the default) in **Settings → AI → Model**. Large "pro" or reasoning-only models are much slower. **Test connection** shows which model answers and how fast. |
 | **Load models** finds models but the list looks short | Fixed in this version: the Model box is now a dropdown listing every text model your key can use. |
-| Notion: "401" or "token is invalid" | Paste the secret again in **Settings → Notion**. Secrets start with `ntn_`. |
+| Notion: "401" or "token is invalid" | Paste the secret again in **Settings → Integrations → Notion**. Secrets start with `ntn_`. |
 | Notion: page list is empty, or "404 / object not found" | The page isn't shared with your integration. In Notion: open the page → **•••** → **Connections** → add **FlowDoc**, then click **Refresh**. |
 | Notion: a subpage is missing | It appears when you open its parent page. Pages inside databases aren't listed: FlowDoc saves under pages, not database rows. |
 | Notion: a database doesn't appear in the picker | FlowDoc saves guides as pages under other pages. Database rows aren't offered as destinations. |
@@ -498,7 +498,7 @@ Each step gets a screenshot. The element you clicked is outlined and the click p
 
 The extension has the same **✨ Improve with AI** and **Translate** as the desktop app, with your own Gemini or Groq key.
 
-1. Open the workspace (**My guides ↗** in the popup) and click **Settings** at the bottom of the left sidebar.
+1. Open the workspace (**My guides ↗** in the popup) and click **Settings** at the bottom of the left sidebar, then **AI**.
 2. Under **AI assistant**, choose **Google Gemini** or **Groq**, paste your key and click **Save key**. [A5](#a5-optional-ai-write-ups-with-gemini-or-groq) explains how to get a key and which model to pick.
 3. Click **Test connection**, then **Done**. **Improve with AI** appears in the guide toolbar, and **Translate** becomes active.
 
@@ -579,7 +579,7 @@ Click highlights (the marks showing what was clicked):
 
 - **One step:** the target icon in the step's toolbar, or **Click highlight** in the screenshot editor.
 - **Every step of this guide:** click **Highlights** in the top toolbar. It reads **Highlights off** while they're hidden; click again to show them all. **Ctrl+Z** undoes it.
-- **How marks look in all guides (desktop app):** **Settings → Click highlight**:
+- **How marks look in all guides (desktop app):** **Settings → General → Click highlight**:
   - **Normal** (default): an outline around the clicked element plus a ring at the exact click point. The ring's centre is see-through, so the text or button under it stays readable.
   - **Box only:** just the outline.
   - **None:** no marks at all. The **Highlights** toggle is then greyed out.

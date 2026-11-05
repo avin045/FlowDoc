@@ -99,6 +99,20 @@ export function shotsDiffer(a, b, region = null, masks = []) {
   return false;
 }
 
+// Areas around the pointer (in DIPs from its tip) that the repeated-click check
+// leaves out: the pointer itself, and the band below it where tooltips and
+// text-selection bubbles (Chrome's "Define", for one) come and go on their
+// own, moving with where exactly you clicked. Beside the pointer is still
+// compared, so a total next to a button going from 1 to 2 counts as a change.
+export const NEAR_POINTER = [
+  { x: -6, y: -6, w: 48, h: 56 }, // the pointer
+  { x: -160, y: 14, w: 480, h: 112 }, // tooltips and bubbles below it, with their shadow
+];
+// A double-click also leaves out the pointer's line of text: double-clicking
+// a word again can select it with or without the space after it, and the
+// text cursor reaches above the point.
+export const NEAR_POINTER_LINE = { x: -90, y: -18, w: 180, h: 34 };
+
 // ---------- text helpers ----------
 
 const clean = (text, max = 60) => {
@@ -381,12 +395,13 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   }
 
   // Whether the screen looks the same in two shots of `rec`'s window, leaving
-  // out the mouse pointer at `points` and the recorder bar.
+  // out the recorder bar and, at each of `points`, what comes and goes with
+  // the mouse pointer rather than with a click (NEAR_POINTER).
   function unchanged(a, b, rec, display, points) {
     if (!a?.dataUrl || !b?.dataUrl) return false;
     const db = display.bounds;
-    const pointer = (p) => ({ x: (p.x - 6 - db.x) / db.width, y: (p.y - 6 - db.y) / db.height, w: 48 / db.width, h: 56 / db.height });
-    const masks = points.filter(Boolean).map(pointer);
+    const boxes = rec.kind === 'dblclick' ? [...NEAR_POINTER, NEAR_POINTER_LINE] : NEAR_POINTER;
+    const masks = points.filter(Boolean).flatMap((p) => boxes.map((m) => ({ x: (p.x + m.x - db.x) / db.width, y: (p.y + m.y - db.y) / db.height, w: m.w / db.width, h: m.h / db.height })));
     const wb = widgetBounds?.();
     if (wb && overlaps(wb, db)) masks.push(fractionOf(wb, db));
     try {
@@ -803,7 +818,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       return { ...state };
     },
     // Used by the self-test to feed synthetic hook events.
-    simulate: { mousedown: onMouseDown, keydown: onKeyDown, keyup: onKeyUp },
+    simulate: { mousedown: onMouseDown, keydown: onKeyDown, keyup: onKeyUp, shot: (point) => grab(displayAt(point)) },
     // Tests: finish queued work, deciding a held click now.
     drain: () => {
       settleSoon();

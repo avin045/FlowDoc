@@ -115,6 +115,8 @@ const barCover = {
   show() {
     if (--barCovers === 0) widgetWin?.setContentProtection(hideBar);
   },
+  // Whether another shot has the bar hidden from captures right now.
+  active: () => barCovers > 0,
 };
 
 const recorder = createRecorder({

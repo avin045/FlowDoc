@@ -318,6 +318,9 @@ if (process.platform === 'linux') {
   const own = bv.ownShot || {};
   check(bv.blurred?.count === 0 && own.toHidden !== null && own.toHidden < own.toVisible / 2, "FlowDoc's own screenshot shows what is behind the bar, not the bar or a blur", JSON.stringify({ ...own, redactions: bv.blurred?.count }));
   check(bv.barProtectedAfterShot === false, 'after the shot the bar is visible to other apps again', String(bv.barProtectedAfterShot));
+  const overlap = bv.overlap || [];
+  const leaked = overlap.filter((s) => s.error || (s.barHidden && !(s.toHidden < s.toVisible / 2)));
+  check(overlap.length === 10 && leaked.length === 0, 'overlapping screenshots never let the bar back into a shot marked as without it', JSON.stringify(leaked.length ? leaked : overlap.map((s) => `${s.barHidden ? 'hidden' : 'blur'}:${s.toHidden}/${s.toVisible}`)));
 }
 check(bv.discarded, 'the test capture was discarded');
 check(bv.restoreBox?.was === false && bv.on?.saved === true && bv.on.barProtected === true && allProtected(bv.on.borderProtected, true), 'ticking it again hides them from captures again', JSON.stringify(bv.on));
@@ -340,9 +343,12 @@ const want = [
 check(count(rc.on, /^Click \*\*Refresh/) === 2 && rc.on?.[0] === want[0], 'clicking Refresh 3 times when nothing changes is one step', JSON.stringify(rc.on));
 check(count(rc.on, /Add one/) === 3, 'clicking "Add one" 3 times keeps 3 steps (each click changed something)', JSON.stringify(rc.on));
 check(count(rc.on, /Clear/) === 1, 'clicking Clear 3 times is one step: only the first click changed anything', JSON.stringify(rc.on));
-check(count(rc.on, /Double-click/) === 2, 'double-clicking Refresh twice is one step', JSON.stringify(rc.on));
+check(count(rc.on, /Double-click \*\*Refresh/) === 2, 'double-clicking Refresh twice is one step', JSON.stringify(rc.on));
 check(count(rc.on, /Right-click/) === 1, 'right-clicking Refresh twice is one step', JSON.stringify(rc.on));
-check(JSON.stringify(rc.on) === JSON.stringify(want), 'a click then a double-click on the same thing are both kept, in order', JSON.stringify(rc.on));
+check(JSON.stringify(rc.on?.slice(0, want.length)) === JSON.stringify(want), 'a click then a double-click on the same thing are both kept, in order', JSON.stringify(rc.on));
+const tail = (rc.on || []).slice(want.length);
+check(tail.length === 2 && /^Double-click \*\*Official/.test(tail[0]), 'double-clicking the same word 4 times (a bubble under it moving each time) is one step', JSON.stringify(tail));
+check(tail.length === 2 && tail[1] === 'Click **Help**', 'clicking a button 3 times while its tooltip comes and goes is one step', JSON.stringify(tail));
 check(count(rc.off, /Refresh/) === 2, 'with the setting off, every click is a step again', JSON.stringify(rc.off));
 
 console.log('\nBrowser tabs');
@@ -481,6 +487,24 @@ check(st.ui?.path === st.applied?.dir && st.ui.kind === 'Custom' && st.ui.resetS
 check(/default folder again/.test(st.ui?.confirm || ''), 'switching asks for confirmation first');
 check(st.reset?.isDefault && st.reset.savedSetting === '' && st.editCameBack, 'Use default switches back, bringing changes along');
 check(st.missingDriveUsable === false, 'a folder on a missing drive is not used at startup (default is used instead)');
+
+console.log('\nSettings sidebar');
+const sb = r.settingsSidebar || {};
+const side = sb.sidebar || {};
+check(JSON.stringify(sb.tabs) === '["general","capture","storage","ai","integrations"]', 'Settings has General, Capture, Storage, AI and Integrations sections', JSON.stringify(sb.tabs));
+check(side.orientation === 'vertical' && side.navLeft && side.stacked, 'the sections are in a sidebar on the left, one under another', JSON.stringify({ orientation: side.orientation, navLeft: side.navLeft, stacked: side.stacked }));
+const wantHeadings = {
+  general: ['Click highlight', 'Keyboard shortcut'],
+  capture: ['While capturing', 'Typed text', 'Steps'],
+  storage: ['Guides folder'],
+  ai: ['AI assistant'],
+  integrations: ['Notion'],
+};
+check(JSON.stringify(side.headings) === JSON.stringify(wantHeadings), 'each section shows only its own settings', JSON.stringify(side.headings));
+check(side.sizes?.length === 1, 'the dialog keeps the same size for every section', JSON.stringify(side.sizes));
+check(JSON.stringify(side.keys) === '["capture","storage","capture","integrations","general","integrations","general"]', 'Up/Down move through the sections (wrapping), Home/End jump to the first/last', JSON.stringify(side.keys));
+check(JSON.stringify(sb.storage) === '["storage"]', 'clicking a section shows only that section', JSON.stringify(sb.storage));
+check(sb.reopened === 'storage' && JSON.stringify(sb.reopenedVisible) === '["storage"]' && sb.focused === 'storage', 'Settings reopens on the section used last, with keyboard focus on it', `${sb.reopened} ${JSON.stringify(sb.reopenedVisible)} focus=${sb.focused}`);
 
 console.log('\nRename + exports');
 check(r.legacyGuide === 'A guide made in StepCraft', 'guides from StepCraft carried over to FlowDoc');

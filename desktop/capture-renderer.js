@@ -80,9 +80,19 @@ window.flowdocCapture.onGrab(({ id, displayId, patch }) => {
   const y = Math.max(0, Math.floor(patch.y * c.height));
   const box = { x, y, w: Math.min(c.width - x, Math.ceil(patch.w * c.width) + 1), h: Math.min(c.height - y, Math.ceil(patch.h * c.height) + 1) };
   if (box.w <= 0 || box.h <= 0) return send(id, c);
-  held.set(id, { video, c, box, bar: spotPixels(c, box) });
+  const spot = spotPixels(c, box);
+  // The frame already shows the spot as it was last seen without the bar
+  // (another shot has it hidden right now): nothing to fill in.
+  if (seen.key === boxKey(box) && seen.clear && meanDiff(spot, seen.clear) < 24) return send(id, c, { barHidden: true });
+  held.set(id, { video, c, box, bar: spot });
   window.flowdocCapture.sendHeld(id);
 });
+
+// The bar's spot as last seen without the bar and with it, from the last shot
+// that filled it in. Shots can overlap: while one waits for the bar to go, the
+// bar may come back from another one, and that must not count as it going.
+let seen = { key: '', clear: null, bar: null };
+const boxKey = (b) => `${b.x},${b.y},${b.w},${b.h}`;
 
 // The bar is being hidden from captures. Frames already on their way may still
 // show it, so wait for one where its spot has changed, and copy that spot in.
@@ -92,11 +102,15 @@ window.flowdocCapture.onPatch(async ({ id }) => {
   if (!h) return;
   held.delete(id);
   const { video, c, box, bar } = h;
+  const key = boxKey(box);
   const end = Date.now() + 800;
   while (Date.now() < end) {
     if (!(await nextFrame(video, end - Date.now()))) break;
-    if (meanDiff(spotPixels(video, box), bar) < 24) continue;
+    const now = spotPixels(video, box);
+    if (meanDiff(now, bar) < 24) continue;
+    if (seen.key === key && seen.bar && meanDiff(now, seen.bar) < 24) continue; // the bar coming back
     c.getContext('2d').drawImage(video, box.x, box.y, box.w, box.h, box.x, box.y, box.w, box.h);
+    seen = { key, clear: now, bar };
     return send(id, c, { barHidden: true });
   }
   send(id, c);

@@ -430,6 +430,15 @@ try {
   check((await app.locator('dialog .needs-ai h2').textContent()) === 'Translation needs AI', 'clicking it explains that AI is needed');
   await app.click('dialog .needs-ai [data-act="settings"]');
   await app.waitForSelector('dialog .settings #aiProvider');
+  const tabs = await app.evaluate(() => ({ all: [...document.querySelectorAll('dialog [role="tab"]')].map((b) => b.dataset.tab), on: document.querySelector('dialog [aria-selected="true"]')?.dataset.tab }));
+  check(JSON.stringify(tabs.all) === '["general","capture","ai"]' && tabs.on === 'ai', 'extension Settings has General, Capture and AI tabs; "Open AI settings" lands on AI', JSON.stringify(tabs));
+  const side = await app.evaluate(() => {
+    const nav = document.querySelector('dialog .settings-tabs');
+    const n = nav.getBoundingClientRect();
+    const b = document.querySelector('dialog .settings-body').getBoundingClientRect();
+    return { orientation: nav.getAttribute('aria-orientation'), left: n.right <= b.left + 1, vertical: getComputedStyle(nav).flexDirection === 'column' };
+  });
+  check(side.orientation === 'vertical' && side.left && side.vertical, 'the sections are in a sidebar left of the settings', JSON.stringify(side));
   const sections = await app.evaluate(() => [...document.querySelectorAll('dialog .settings h3')].map((h) => h.textContent.trim()));
   check(!sections.some((s) => /Guides folder|Notion/.test(s)) && sections.some((s) => s.startsWith('AI assistant')), 'extension settings show only what applies there', sections.join(', '));
   const capture = await app.evaluate(() => ({

@@ -411,7 +411,7 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     const toggle = async () => {
       await mainJs(`document.querySelector('.settings-btn').click()`);
       for (let i = 0; i < 30 && !(await mainJs(`!!document.querySelector('dialog [name="hideBar"]')`)); i++) await sleep(100);
-      await mainJs(`document.querySelector('dialog [name="hideBar"]').scrollIntoView({ block: 'center' })`);
+      await mainJs(`document.querySelector('dialog [data-tab="capture"]').click(); document.querySelector('dialog [name="hideBar"]').scrollIntoView({ block: 'center' })`);
       if (!bv.pictured) {
         await sleep(300);
         await shot(mainWin, 'desktop-settings-capture.png');
@@ -481,6 +481,21 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     bv.screenGrab = seen && unseen ? { meanDiff: meanDiff(seen, unseen) } : { error: 'no screen source' };
     const ours = last?.screenshot ? barSpot(nativeImage.createFromDataURL(last.screenshot), 'own-shot') : null;
     bv.ownShot = { barHidden: !!ours, toHidden: meanDiff(ours, unseen), toVisible: meanDiff(ours, seen) };
+    // Shots that overlap (a click's shot while a held repeated click is being
+    // judged): one shot showing the bar again must not let it into another.
+    // Each shot marked as without the bar has to look like the hidden grab.
+    // First let the screen stream catch up with the bar being visible again.
+    await sleep(800);
+    bv.overlapBefore = await recorder.simulate.shot({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).then((f) => f && { barHidden: !!f.barHidden });
+    await sleep(800);
+    const shots = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => sleep(i * 30).then(() => recorder.simulate.shot({ x: b.x + b.width / 2, y: b.y + b.height / 2 }))),
+    );
+    bv.overlap = shots.map((f, i) => {
+      if (!f?.dataUrl) return { i, error: 'no shot' };
+      const spot = barSpot(nativeImage.createFromDataURL(f.dataUrl), `overlap-${i}`);
+      return { i, barHidden: !!f.barHidden, toHidden: meanDiff(spot, unseen), toVisible: meanDiff(spot, seen) };
+    });
     await recorder.discard();
     bv.discarded = !(await getGuide(started.guideId));
     bv.restoreBox = await toggle();
@@ -518,14 +533,49 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
       mark.textContent = 'selected text';
       document.body.append(mark);
       add('clear', 'Clear', 112, () => (mark.style.background = 'transparent'));
+      // A word in text: double-clicking selects it and, like Chrome's "Define",
+      // shows a bubble under it that follows where exactly you clicked and
+      // fades after a while. Picking the same word again changes nothing else.
+      const para = document.createElement('p');
+      para.style.cssText = 'position:fixed;left:24px;top:150px;z-index:9;margin:0;font:16px sans-serif;color:#0f172a;background:#fff';
+      para.innerHTML = '<b id="word">Official</b> rules apply here.';
+      document.body.append(para);
+      const bubble = document.createElement('div');
+      bubble.textContent = 'Define';
+      bubble.style.cssText = 'position:fixed;display:none;z-index:10;padding:6px 12px;background:#334155;color:#fff;font:13px sans-serif;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.35)';
+      document.body.append(bubble);
+      let fade = 0;
+      document.addEventListener('dblclick', (e) => {
+        if (e.target.id !== 'word') return;
+        bubble.style.left = e.clientX - 30 + 'px';
+        bubble.style.top = e.clientY + 26 + 'px';
+        bubble.style.display = 'block';
+        clearTimeout(fade);
+        fade = setTimeout(() => (bubble.style.display = 'none'), 2500);
+      });
+      // A button with a tooltip: pressing it hides the tooltip, which comes
+      // back under the pointer a moment later. Clicking it changes nothing else.
+      add('help', 'Help', 196);
+      const tip = document.createElement('div');
+      tip.textContent = 'Shows the help for this page';
+      tip.style.cssText = 'position:fixed;display:none;z-index:10;padding:4px 8px;background:#fffbe6;color:#0f172a;border:1px solid #94a3b8;font:12px sans-serif';
+      document.body.append(tip);
+      const help = document.getElementById('help');
+      help.addEventListener('mousedown', () => (tip.style.display = 'none'));
+      help.addEventListener('mouseup', (e) => setTimeout(() => {
+        tip.style.left = e.clientX + 'px';
+        tip.style.top = e.clientY + 22 + 'px';
+        tip.style.display = 'block';
+      }, 300));
     })()`);
     demo.showInactive();
     await sleep(500);
     // Both presses of a double-click, the way the hook and the page see them.
-    async function dblclick(selector) {
+    // `dx` moves the point a little, as a person never hits the same pixel twice.
+    async function dblclick(selector, dx = 0) {
       const { css, dip } = await centerOf(selector);
-      const phys = toPhysical({ x: Math.round(dip.x), y: Math.round(dip.y) });
-      const at = { x: Math.round(css.x), y: Math.round(css.y), button: 'left' };
+      const phys = toPhysical({ x: Math.round(dip.x + dx), y: Math.round(dip.y) });
+      const at = { x: Math.round(css.x + dx), y: Math.round(css.y), button: 'left' };
       for (const clickCount of [1, 2]) {
         recorder.simulate.mousedown({ x: phys.x, y: phys.y, button: 1, clicks: clickCount });
         await sleep(40);
@@ -545,6 +595,12 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     for (let i = 0; i < 2; i++) await click('#noop', { button: 2 });
     await click('#noop');
     await dblclick('#noop'); // a different kind of click from the one before: kept
+    // The same word double-clicked again and again, a few pixels apart: one step.
+    for (const dx of [0, -6, 5, 0]) await dblclick('#word', dx);
+    await sleep(2600); // the bubble fades before the next test
+    // A button whose tooltip comes and goes: one step.
+    for (let i = 0; i < 3; i++) await click('#help');
+    await sleep(1800); // the last held click is decided
     await recorder.drain();
     rc.on = await texts(started.guideId);
     await recorder.discard();
@@ -813,6 +869,7 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   await settings.update({ ai: { provider: 'gemini' } });
   await js(`document.querySelector('.settings-btn').click()`);
   await sleep(600);
+  await js(`document.querySelector('dialog [data-tab="ai"]').click()`);
   await js(`document.querySelector('dialog [data-act="models"]').click()`);
   results.models = await waitFor(() =>
     js(`(() => {
@@ -998,6 +1055,7 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   // Settings: the three cards, and "None" disables the toolbar toggle.
   await js(`document.querySelector('.settings-btn').click()`);
   await waitFor(() => js(`!!document.querySelector('dialog [name="hlStyle"]')`));
+  await js(`document.querySelector('dialog [data-tab="general"]').click()`);
   results.highlight.settings = await js(`({ options: [...document.querySelectorAll('dialog [name="hlStyle"]')].map((r) => r.value), checked: document.querySelector('dialog [name="hlStyle"]:checked')?.value })`);
   await js(`document.querySelector('dialog [name="hlStyle"][value="none"]').click()`);
   await sleep(500);
@@ -1033,6 +1091,7 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     await sleep(500);
     await js(`document.querySelector('.settings-btn').click()`);
     await waitFor(() => js(`document.querySelector('dialog .folder-path')?.textContent || null`));
+    await js(`document.querySelector('dialog [data-tab="storage"]').click()`);
     st.ui = await js(`({ path: document.querySelector('dialog .folder-path').textContent, kind: document.querySelector('dialog .folder-kind').textContent, resetShown: !document.querySelector('dialog [data-act="resetFolder"]').hidden })`);
     await js(`document.querySelector('dialog [data-act="resetFolder"]').click()`);
     await sleep(400);
@@ -1046,6 +1105,70 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     st.editCameBack = (await getGuide(guideId)).description === 'Edited while stored in a custom folder';
     st.missingDriveUsable = await folderUsable('Q:\\\\definitely\\\\not\\\\here');
     results.storage = st;
+  }
+
+  progress('settings sidebar');
+  // ---------- Settings: sections in a sidebar ----------
+  {
+    const sb = {};
+    await js(`location.hash = '#/'; window.flowdocApp.route()`);
+    await sleep(400);
+    await js(`document.querySelector('.settings-btn').click()`);
+    await waitFor(() => js(`!!document.querySelector('dialog [data-tab="storage"]')`));
+    sb.tabs = await js(`[...document.querySelectorAll('dialog [role="tab"]')].map((b) => b.dataset.tab)`);
+    // Sections sit in a sidebar left of the panel, stacked top to bottom, and
+    // the dialog keeps one size whichever section is shown.
+    sb.sidebar = await js(`(async () => {
+      const d = document.querySelector('dialog');
+      const nav = d.querySelector('.settings-tabs');
+      const body = d.querySelector('.settings-body').getBoundingClientRect();
+      const n = nav.getBoundingClientRect();
+      const bs = [...d.querySelectorAll('[role="tab"]')];
+      const rs = bs.map((b) => b.getBoundingClientRect());
+      const sizes = [];
+      const headings = {};
+      for (const b of bs) {
+        b.click();
+        await new Promise((r) => setTimeout(r, 60));
+        const r = d.querySelector('form').getBoundingClientRect();
+        sizes.push(Math.round(r.width) + 'x' + Math.round(r.height));
+        const shown = [...d.querySelectorAll('.settings-panel')].filter((p) => !p.hidden);
+        headings[b.dataset.tab] = shown.length === 1 ? [...shown[0].querySelectorAll('h3')].map((h) => h.firstChild.textContent.trim()) : 'panels: ' + shown.length;
+      }
+      // Keyboard: Down/Up move through the sections (and wrap), Home/End jump.
+      const keys = [];
+      d.querySelector('[data-tab="general"]').click();
+      d.querySelector('[data-tab="general"]').focus();
+      for (const k of ['ArrowDown', 'ArrowDown', 'ArrowUp', 'End', 'ArrowDown', 'ArrowUp', 'Home']) {
+        document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+        const on = d.querySelector('[role="tab"][aria-selected="true"]');
+        keys.push(on.dataset.tab + (document.activeElement === on ? '' : '!focus'));
+      }
+      return {
+        orientation: nav.getAttribute('aria-orientation'),
+        navLeft: n.right <= body.left + 1 && n.top <= body.top + 1 && n.bottom >= body.bottom - 1,
+        stacked: rs.every((r, i) => !i || (r.top >= rs[i - 1].bottom - 1 && Math.abs(r.left - rs[0].left) < 1)),
+        sizes: [...new Set(sizes)],
+        headings,
+        keys,
+      };
+    })()`);
+    await js(`document.querySelector('dialog [data-tab="capture"]').click()`);
+    await sleep(200);
+    await shot(mainWin, 'desktop-settings-sidebar.png');
+    await js(`document.querySelector('dialog [data-tab="storage"]').click()`);
+    await sleep(100);
+    sb.storage = await js(`[...document.querySelectorAll('dialog .settings-panel')].filter((p) => !p.hidden).map((p) => p.dataset.panel)`);
+    await js(`document.querySelector('dialog [data-close]').click()`);
+    await sleep(300);
+    // Opening Settings again comes back to the section used last.
+    await js(`document.querySelector('.settings-btn').click()`);
+    sb.reopened = await waitFor(() => js(`document.querySelector('dialog [role="tab"][aria-selected="true"]')?.dataset.tab || null`), 5000).catch(() => null);
+    sb.reopenedVisible = await js(`[...document.querySelectorAll('dialog .settings-panel')].filter((p) => !p.hidden).map((p) => p.dataset.panel)`);
+    sb.focused = await js(`document.activeElement?.dataset?.tab || ''`);
+    await js(`document.querySelector('dialog [data-close]').click()`);
+    await sleep(300);
+    results.settingsSidebar = sb;
   }
 
   progress('exports');

@@ -1,6 +1,7 @@
-// Workspace settings and the AI dialogs (Improve with AI, Translate). The
-// desktop app shows every setting; the browser extension shows the AI,
-// click-highlight and repeated-click ones (aiHost.js keeps them in the browser profile).
+// Workspace settings and the AI dialogs (Improve with AI, Translate). Settings
+// has a sidebar of sections: General, Capture, Storage (guides folder), AI and
+// Integrations (Notion). The browser extension shows General, Capture and AI
+// (aiHost.js keeps those in the browser profile).
 import { STYLES, TRANSLATE_PARTS, translationPieces, UI_NAME_MODES, testConnection } from './ai.js';
 import { aiEnabled, aiHost } from './aiHost.js';
 import { cancelJob, estimateRemaining, getJob, onJobChange, startJob } from './aiJobs.js';
@@ -19,16 +20,80 @@ function h(html) {
 
 // ---------- settings ----------
 
-export async function openSettingsDialog({ toast, onClose }) {
+const TAB_ICONS = {
+  general: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  capture: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
+  storage: '<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>',
+  ai: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  integrations: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/>',
+};
+// The desktop app has every tab; the extension only what applies there.
+const SETTINGS_TABS = [
+  { id: 'general', label: 'General' },
+  { id: 'capture', label: 'Capture' },
+  { id: 'storage', label: 'Storage', desktop: true },
+  { id: 'ai', label: 'AI' },
+  { id: 'integrations', label: 'Integrations', desktop: true },
+];
+const TAB_KEY = 'flowdoc.settingsTab';
+
+/**
+ * @param {object} o
+ * @param {string} [o.tab]  'general' | 'capture' | 'storage' | 'ai' | 'integrations';
+ *   without it, Settings reopens on the tab used last.
+ */
+export async function openSettingsDialog({ toast, onClose, tab } = {}) {
   let s = await aiHost.settings.get();
-  const dlg = h(`<dialog><form class="dlg settings" method="dialog">
-    <h2>Settings</h2>
-    ${
-      desktop
-        ? `<p class="sub">Everything stays on this computer. API keys are encrypted with your system keychain${s.secureStorage ? '' : ' <b>(keychain unavailable: stored obfuscated only)</b>'}.</p>`
-        : '<p class="sub">Your API key is kept in this browser profile only (extension storage, not encrypted). Anyone who can use this browser profile could read it. Remove it any time with <b>Remove key</b>.</p>'
-    }
+  const tabs = SETTINGS_TABS.filter((t) => desktop || !t.desktop);
+  let remembered = '';
+  try {
+    remembered = localStorage.getItem(TAB_KEY) || '';
+  } catch {}
+  const first = [tab, remembered].find((id) => tabs.some((t) => t.id === id)) || tabs[0].id;
+  const panel = (id, html) => `<section class="settings-panel" role="tabpanel" id="sp-${id}" aria-labelledby="st-${id}" data-panel="${id}" tabindex="0">${html}</section>`;
+  const keyNote = desktop
+    ? `<p class="sub">Keys and secrets stay on this computer, encrypted with your system keychain${s.secureStorage ? '' : ' <b>(keychain unavailable: stored obfuscated only)</b>'}.</p>`
+    : '<p class="sub">Your API key is kept in this browser profile only (extension storage, not encrypted). Anyone who can use this browser profile could read it. Remove it any time with <b>Remove key</b>.</p>';
+  const dlg = h(`<dialog class="settings-dialog"><form class="dlg settings" method="dialog">
+    <div class="settings-head"><h2>Settings</h2></div>
+    <div class="settings-main">
+    <nav class="settings-tabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+      ${tabs
+        .map(
+          (t) => `<button type="button" role="tab" id="st-${t.id}" data-tab="${t.id}" aria-controls="sp-${t.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TAB_ICONS[t.id]}</svg><span>${t.label}</span></button>`,
+        )
+        .join('')}
+    </nav>
+    <div class="settings-body">
+    ${panel(
+      'general',
+      `
+    <h3>Click highlight</h3>
+    <p class="hint">How clicks are marked on screenshots, in the editor and in every export. To hide marks in one guide only, use <b>Highlights</b> in that guide's toolbar.</p>
+    <div class="hl-styles" role="radiogroup" aria-label="Click highlight style">
+      <label class="hl-card"><input type="radio" name="hlStyle" value="normal"><strong>Normal</strong><span>Outline around the clicked element and a ring where you clicked</span></label>
+      <label class="hl-card"><input type="radio" name="hlStyle" value="box"><strong>Box only</strong><span>Just the outline around the clicked element</span></label>
+      <label class="hl-card"><input type="radio" name="hlStyle" value="none"><strong>None</strong><span>No marks on screenshots</span></label>
+    </div>
+    ${desktop ? '<h3>Keyboard shortcut</h3><p class="hint">Start or stop a capture from anywhere: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></p>' : ''}`,
+    )}
+    ${panel(
+      'capture',
+      `
     ${desktop ? `
+    <h3>While capturing</h3>
+    <label class="check"><input type="checkbox" name="hideWindow"> Minimise FlowDoc while capturing</label>
+    <label class="check"><input type="checkbox" name="hideBar"> Hide the recorder bar from screen recordings and meetings</label>
+    <p class="hint hide-bar-hint">Untick to let screen recorders and meeting apps show the bar (and the area border). Clicks on the bar are never recorded as steps, and the bar still stays out of FlowDoc's own screenshots: viewers see it blink briefly at each step.</p>
+    <h3>Typed text</h3>
+    <label class="check"><input type="checkbox" name="typedText"> Include typed text in steps (passwords are always hidden)</label>
+    <label class="check"><input type="checkbox" name="unknownFieldText"> Also include keystrokes when the field type can't be detected</label>
+    ` : ''}
+    <h3>Steps</h3>
+    <label class="check"><input type="checkbox" name="ignoreRepeats"> Ignore repeated clicks that change nothing</label>
+    <p class="hint">Clicking, double-clicking or right-clicking the same thing again (waiting for a slow page, or unsure the click worked) doesn't add another step when that click changed nothing. Clicks that change something are always kept.</p>`,
+    )}
+    ${desktop ? panel('storage', `
     <h3>Guides folder</h3>
     <p class="hint">Where FlowDoc keeps your guides on this computer. Choose any folder, for example in Documents or on another drive.</p>
     <div class="folder-box"><span class="folder-path"></span><span class="pill folder-kind"></span></div>
@@ -47,8 +112,11 @@ export async function openSettingsDialog({ toast, onClose }) {
       </div>
     </div>
     <p class="error-text folder-error" hidden></p>
-    ` : ''}
-
+    `) : ''}
+    ${panel(
+      'ai',
+      `
+    ${keyNote}
     <h3>AI assistant <span class="pill">Optional</span></h3>
     <p class="hint">Rewrites step instructions from the screenshots, writes the guide title and description, and translates guides. Uses your own API key: the text (and, for Improve, screenshots) is sent to the provider you choose.</p>
     <div class="field-row">
@@ -86,9 +154,10 @@ export async function openSettingsDialog({ toast, onClose }) {
           <span class="test-result hint"></span>
         </div>
       </div>
-    </div>
-
-    ${desktop ? `
+    </div>`,
+    )}
+    ${desktop ? panel('integrations', `
+    ${keyNote}
     <h3>Notion <span class="pill">Optional</span></h3>
     <p class="hint">Save guides as Notion pages, with screenshots, under any page you choose.</p>
     <details class="notion-help"><summary>How to get a Notion integration secret</summary>${CONNECT_STEPS}</details>
@@ -107,32 +176,55 @@ export async function openSettingsDialog({ toast, onClose }) {
         <span class="notion-result hint"></span>
       </div>
     </div>
-    ` : ''}
-
-    <h3>Click highlight</h3>
-    <p class="hint">How clicks are marked on screenshots, in the editor and in every export. To hide marks in one guide only, use <b>Highlights</b> in that guide's toolbar.</p>
-    <div class="hl-styles" role="radiogroup" aria-label="Click highlight style">
-      <label class="hl-card"><input type="radio" name="hlStyle" value="normal"><strong>Normal</strong><span>Outline around the clicked element and a ring where you clicked</span></label>
-      <label class="hl-card"><input type="radio" name="hlStyle" value="box"><strong>Box only</strong><span>Just the outline around the clicked element</span></label>
-      <label class="hl-card"><input type="radio" name="hlStyle" value="none"><strong>None</strong><span>No marks on screenshots</span></label>
+    <p class="hint more-integrations">AI providers are under <b>AI</b>.</p>
+    `) : ''}
     </div>
-
-    <h3>Capture</h3>
-    ${desktop ? `
-    <label class="check"><input type="checkbox" name="hideWindow"> Minimise FlowDoc while capturing</label>
-    <label class="check"><input type="checkbox" name="hideBar"> Hide the recorder bar from screen recordings and meetings</label>
-    <p class="hint hide-bar-hint">Untick to let screen recorders and meeting apps show the bar (and the area border). Clicks on the bar are never recorded as steps, and the bar still stays out of FlowDoc's own screenshots: viewers see it blink briefly at each step.</p>
-    <label class="check"><input type="checkbox" name="typedText"> Include typed text in steps (passwords are always hidden)</label>
-    <label class="check"><input type="checkbox" name="unknownFieldText"> Also include keystrokes when the field type can't be detected</label>
-    ` : ''}
-    <label class="check"><input type="checkbox" name="ignoreRepeats"> Ignore repeated clicks that change nothing</label>
-    <p class="hint">Clicking, double-clicking or right-clicking the same thing again (waiting for a slow page, or unsure the click worked) doesn't add another step when that click changed nothing. Clicks that change something are always kept.</p>
-    ${desktop ? '<p class="hint">Shortcut to start or stop a capture from anywhere: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></p>' : ''}
-
+    </div>
     <div class="dlg-foot"><button type="button" class="primary" data-close>Done</button></div>
   </form></dialog>`);
   const f = dlg.querySelector('form');
   const $ = (sel) => dlg.querySelector(sel);
+
+  // ---------- tabs ----------
+  const tabButtons = [...dlg.querySelectorAll('[role="tab"]')];
+  const showTab = (id, { focus = false } = {}) => {
+    for (const b of tabButtons) {
+      const on = b.dataset.tab === id;
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on && focus) b.focus();
+    }
+    dlg.querySelectorAll('.settings-panel').forEach((p) => (p.hidden = p.dataset.panel !== id));
+    $('.settings-body').scrollTop = 0;
+    // Narrow windows turn the sidebar into a scrolling row: keep the chosen
+    // section in view there (scrolls only the row, never the dialog).
+    const nav = $('.settings-tabs');
+    const b = tabButtons.find((x) => x.dataset.tab === id);
+    if (nav.scrollWidth > nav.clientWidth && b) {
+      const left = b.offsetLeft - nav.offsetLeft;
+      if (left < nav.scrollLeft || left + b.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = left - 8;
+    }
+    try {
+      localStorage.setItem(TAB_KEY, id);
+    } catch {}
+  };
+  tabButtons.forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  // Sidebar (vertical) on wide windows, a row of tabs on narrow ones.
+  const narrow = matchMedia('(max-width: 640px)');
+  const orient = () => $('.settings-tabs').setAttribute('aria-orientation', narrow.matches ? 'horizontal' : 'vertical');
+  orient();
+  narrow.addEventListener('change', orient);
+  $('.settings-tabs').addEventListener('focusin', orient); // in case a change was missed
+  dlg.addEventListener('close', () => narrow.removeEventListener('change', orient));
+  $('.settings-tabs').addEventListener('keydown', (e) => {
+    const at = tabButtons.indexOf(document.activeElement);
+    if (at < 0) return;
+    const next = { ArrowDown: at + 1, ArrowRight: at + 1, ArrowUp: at - 1, ArrowLeft: at - 1, Home: 0, End: tabButtons.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    showTab(tabButtons[(next + tabButtons.length) % tabButtons.length].dataset.tab, { focus: true });
+  });
+  showTab(first);
 
   const fill = () => {
     f.provider.value = s.ai.provider;
@@ -275,6 +367,8 @@ export async function openSettingsDialog({ toast, onClose }) {
   });
   document.body.append(dlg);
   dlg.showModal();
+  // Start keyboard focus on the open section, not the first one in the list.
+  dlg.querySelector('[role="tab"][aria-selected="true"]')?.focus();
 }
 
 // Guides folder and Notion (desktop app only).
@@ -529,7 +623,7 @@ export async function openImproveDialog(guide, { toast, auto = false }) {
 export function openNeedsAiDialog(what, { toast, onSettingsClosed } = {}) {
   const dlg = h(`<dialog><div class="dlg needs-ai">
     <h2>${escapeHtml(what)} needs AI</h2>
-    <p class="sub">FlowDoc uses your own Google Gemini or Groq API key for this. Add one in <b>Settings → AI assistant</b>. It takes about a minute, and both have a free tier.</p>
+    <p class="sub">FlowDoc uses your own Google Gemini or Groq API key for this. Add one in <b>Settings → AI</b>. It takes about a minute, and both have a free tier.</p>
     <div class="dlg-foot">
       <button class="secondary" data-act="later">Not now</button>
       <button class="primary" data-act="settings">Open AI settings</button>
@@ -538,7 +632,7 @@ export function openNeedsAiDialog(what, { toast, onSettingsClosed } = {}) {
   dlg.querySelector('[data-act="later"]').addEventListener('click', () => dlg.close());
   dlg.querySelector('[data-act="settings"]').addEventListener('click', () => {
     dlg.close();
-    openSettingsDialog({ toast, onClose: onSettingsClosed });
+    openSettingsDialog({ toast, onClose: onSettingsClosed, tab: 'ai' });
   });
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);

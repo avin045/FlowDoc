@@ -65,7 +65,15 @@ export function createCapture({ dir, log = () => {} }) {
   async function grab(display, { cover } = {}) {
     if (win && streaming) {
       const id = nextId++;
+      // Another shot may have the bar hidden right now. Keep it hidden through
+      // this one too, so that shot can't show the bar again while this one
+      // waits for a frame without it (capture-renderer.js also tells the bar
+      // coming back apart from it going away).
       let hidden = false;
+      if (cover?.active?.()) {
+        cover.hide();
+        hidden = true;
+      }
       const result = await new Promise((resolve) => {
         const done = (frame) => {
           clearTimeout(timer);
@@ -77,7 +85,7 @@ export function createCapture({ dir, log = () => {} }) {
         ipcMain.once(`capture:frame:${id}`, (_e, frame) => done(frame));
         // The renderer has kept the frame; hide the bar, then let it fill the spot.
         ipcMain.once(`capture:held:${id}`, () => {
-          cover.hide();
+          if (!hidden) cover.hide();
           hidden = true;
           win?.webContents.send('capture:patch', { id });
         });
