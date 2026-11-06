@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createNotionMock } from './mock-notion.mjs';
 import { startServer } from './serve.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -431,7 +432,7 @@ try {
   await app.click('dialog .needs-ai [data-act="settings"]');
   await app.waitForSelector('dialog .settings #aiProvider');
   const tabs = await app.evaluate(() => ({ all: [...document.querySelectorAll('dialog [role="tab"]')].map((b) => b.dataset.tab), on: document.querySelector('dialog [aria-selected="true"]')?.dataset.tab }));
-  check(JSON.stringify(tabs.all) === '["general","capture","ai"]' && tabs.on === 'ai', 'extension Settings has General, Capture and AI tabs; "Open AI settings" lands on AI', JSON.stringify(tabs));
+  check(JSON.stringify(tabs.all) === '["general","capture","ai","integrations"]' && tabs.on === 'ai', 'extension Settings has General, Capture, AI and Integrations; "Open AI settings" lands on AI', JSON.stringify(tabs));
   const side = await app.evaluate(() => {
     const nav = document.querySelector('dialog .settings-tabs');
     const n = nav.getBoundingClientRect();
@@ -440,13 +441,13 @@ try {
   });
   check(side.orientation === 'vertical' && side.left && side.vertical, 'the sections are in a sidebar left of the settings', JSON.stringify(side));
   const sections = await app.evaluate(() => [...document.querySelectorAll('dialog .settings h3')].map((h) => h.textContent.trim()));
-  check(!sections.some((s) => /Guides folder|Notion/.test(s)) && sections.some((s) => s.startsWith('AI assistant')), 'extension settings show only what applies there', sections.join(', '));
+  check(!sections.some((s) => /Guides folder|While capturing|Typed text/.test(s)) && sections.some((s) => s.startsWith('AI assistant')) && sections.some((s) => s.startsWith('Notion')), 'extension settings show only what applies there (Notion included)', sections.join(', '));
   const capture = await app.evaluate(() => ({
     boxes: [...document.querySelectorAll('dialog .settings input[type="checkbox"]')].map((c) => c.name),
     ignoreRepeats: document.querySelector('dialog .settings [name="ignoreRepeats"]')?.checked,
   }));
   check(JSON.stringify(capture.boxes) === '["ignoreRepeats"]' && capture.ignoreRepeats === true, 'Capture has only "Ignore repeated clicks that change nothing", ticked by default', JSON.stringify(capture));
-  check(/browser profile only/.test(await app.locator('dialog .settings .sub').textContent()), 'settings say where the key is kept');
+  check(/browser profile only.*encrypted/.test(await app.locator('dialog .settings .sub').first().textContent()), 'settings say where the key is kept, and that it is encrypted');
   await app.selectOption('dialog .settings #aiProvider', 'gemini');
   await app.fill('dialog .settings #aiKey', 'test-extension-key');
   await app.click('dialog .settings [data-act="saveKey"]');
@@ -491,6 +492,172 @@ try {
   await app.click('dialog .improve .go');
   const improved = await waitGuide(guideId, (g) => g.title === 'How to open a support ticket (AI)');
   check(improved.steps.filter((s) => s.kind === 'action').every((s) => s.text.endsWith('✓')), 'Improve with AI works in the extension', improved.title);
+
+  // ---------- secrets are stored encrypted ----------
+  console.log('\nEncrypted keys');
+  const rawKeys = () => app.evaluate(async () => (await chrome.storage.local.get('flowdoc_ai_keys')).flowdoc_ai_keys || {});
+  const sealedShape = (v) => !!v && typeof v === 'object' && v.v === 1 && typeof v.iv === 'string' && typeof v.data === 'string';
+  const unsealRaw = (v) => app.evaluate(async (val) => (await import('./shared/secretStore.js')).unseal(val), v);
+  let raw = await rawKeys();
+  check(sealedShape(raw.gemini) && !JSON.stringify(raw).includes('test-extension-key'), 'the AI key is stored encrypted, never as text', JSON.stringify(raw.gemini).slice(0, 80));
+  check((await unsealRaw(raw.gemini)) === 'test-extension-key', 'and decrypts back to the key that was pasted');
+  const ivs = await app.evaluate(async () => {
+    const { seal } = await import('./shared/secretStore.js');
+    const [a, b] = [await seal('same text'), await seal('same text')];
+    return { differ: a.iv !== b.iv && a.data !== b.data };
+  });
+  check(ivs.differ, 'the same text encrypts differently every time (fresh IV)');
+  const keyInfo = await app.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const req = indexedDB.open('flowdoc-secrets');
+        req.onsuccess = () => {
+          const get = req.result.transaction('keys').objectStore('keys').get('aes-gcm-1');
+          get.onsuccess = async () => {
+            const k = get.result;
+            let exported = 'exported';
+            try {
+              await crypto.subtle.exportKey('raw', k);
+            } catch (e) {
+              exported = e.name;
+            }
+            resolve({ type: k?.type, algorithm: k?.algorithm?.name, length: k?.algorithm?.length, extractable: k?.extractable, exported });
+          };
+        };
+      }),
+  );
+  check(keyInfo.algorithm === 'AES-GCM' && keyInfo.length === 256 && keyInfo.extractable === false && keyInfo.exported === 'InvalidAccessError', 'the key is AES-GCM 256, kept apart in IndexedDB, and cannot be read out', JSON.stringify(keyInfo));
+  const tampered = await app.evaluate(async (v) => {
+    const { unseal } = await import('./shared/secretStore.js');
+    const bytes = Uint8Array.from(atob(v.data), (c) => c.charCodeAt(0));
+    bytes[0] ^= 1;
+    try {
+      await unseal({ ...v, data: btoa(String.fromCharCode(...bytes)) });
+      return 'decrypted';
+    } catch (e) {
+      return e.message;
+    }
+  }, raw.gemini);
+  check(/could not be decrypted/.test(tampered), 'a changed byte makes decryption fail (no wrong key handed out)', tampered);
+  // A key saved as text by an older version is encrypted when the workspace opens.
+  await app.evaluate(async () => {
+    const keys = (await chrome.storage.local.get('flowdoc_ai_keys')).flowdoc_ai_keys || {};
+    await chrome.storage.local.set({ flowdoc_ai_keys: { ...keys, groq: 'plain-groq-key' } });
+  });
+  await app.goto(`chrome-extension://${extId}/app.html#/`);
+  await app.reload(); // a fresh workspace, as when it is opened again
+  await app.waitForSelector('.card');
+  await app.evaluate(async () => (await import('./app/aiHost.js')).aiHost.settings.get());
+  raw = await rawKeys();
+  check(sealedShape(raw.groq) && !JSON.stringify(raw).includes('plain-groq-key') && (await unsealRaw(raw.groq)) === 'plain-groq-key', 'a key saved as text before is encrypted on first open, and still works', JSON.stringify(raw.groq).slice(0, 60));
+
+  // ---------- Notion in the extension ----------
+  console.log('\nNotion');
+  const { notion: nmock, handle: notionHandle } = createNotionMock();
+  await context.route('https://api.notion.com/**', async (route) => {
+    const req = route.request();
+    const u = new URL(req.url());
+    const { status, data } = notionHandle({ method: req.method(), url: u.pathname + u.search, headers: await req.allHeaders(), body: req.postDataBuffer() });
+    await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
+  });
+  await app.goto(`chrome-extension://${extId}/app.html#/guide/${guideId}`);
+  await app.waitForSelector('[data-act="notion"]');
+  check(true, 'the guide toolbar has a Notion button');
+  // Connect in Settings → Integrations.
+  await app.evaluate(() => document.querySelector('.settings-btn').click());
+  await app.waitForSelector('dialog .settings [data-tab="integrations"]');
+  await app.click('dialog .settings [data-tab="integrations"]');
+  await app.fill('dialog .settings #notionToken', 'ntn_ext_secret');
+  await app.click('dialog .settings [data-act="saveNotion"]');
+  await app.waitForFunction(() => /Connected to/.test(document.querySelector('dialog .notion-result')?.textContent || ''));
+  check(/Avinash Workspace · 1 page/.test(await app.locator('dialog .notion-result').textContent()), 'Settings → Integrations: Save and Test connection reach Notion', await app.locator('dialog .notion-result').textContent());
+  await app.screenshot({ path: join(out, 'extension-notion-settings.png') });
+  await app.click('dialog .settings [data-close]');
+  raw = await rawKeys();
+  check(sealedShape(raw.notion) && !JSON.stringify(raw).includes('ntn_ext_secret') && (await unsealRaw(raw.notion)) === 'ntn_ext_secret', 'the Notion secret is stored encrypted');
+
+  const nrows = () => app.evaluate(() => [...document.querySelectorAll('dialog .tree .node .title')].map((n) => n.textContent));
+  const waitNRows = async (expected) => {
+    for (const end = Date.now() + 15000; Date.now() < end; await app.waitForTimeout(150)) if (JSON.stringify(await nrows()) === JSON.stringify(expected)) return expected;
+    return nrows();
+  };
+  const clickNRow = (title) => app.evaluate((t) => [...document.querySelectorAll('dialog .tree .node')].find((n) => n.querySelector('.title').textContent === t)?.click(), title);
+  const nPath = () => app.evaluate(() => document.querySelector('dialog .selected-path b')?.textContent || '');
+  const openNotion = async () => {
+    await app.click('[data-act="notion"]');
+    await app.waitForSelector('dialog .notion .who b');
+  };
+  const FULL = 'Team wiki / How-tos / AWS Trial / some_topic / some_topic_2';
+  await openNotion();
+  const nroots = await waitNRows(['Team wiki']);
+  check(JSON.stringify(nroots) === '["Team wiki"]', 'Save to Notion lists the shared pages (database rows skipped)', JSON.stringify(nroots));
+  for (const [title, next] of [['Team wiki', ['How-tos', 'Archive']], ['How-tos', ['AWS Trial']], ['AWS Trial', ['some_topic']], ['some_topic', ['some_topic_2']]]) {
+    await clickNRow(title);
+    await waitNRows(next);
+  }
+  await clickNRow('some_topic_2');
+  await app.waitForFunction(() => (document.querySelector('dialog .tree .empty-tree')?.textContent || '').includes('No subpages'));
+  check((await nPath()) === FULL, 'browsing 5 levels deep (through columns and toggles) sets the destination', await nPath());
+  await app.click('dialog [data-act="star"]');
+  await app.fill('dialog [name="locName"]', 'AWS LEARNING');
+  await app.click('dialog [data-act="saveLoc"]');
+  await app.waitForSelector('dialog .chip-go');
+  check((await app.locator('dialog .chip-go').first().textContent()) === '★ AWS LEARNING', 'a location can be saved with a name');
+  await app.screenshot({ path: join(out, 'extension-notion-picker.png') });
+  await app.click('dialog [data-act="save"]');
+  await app.waitForSelector('dialog .done:not([hidden])', { timeout: 30000 });
+  await app.screenshot({ path: join(out, 'extension-notion-done.png') });
+  const nshots = (await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId)).steps.filter((s) => s.screenshot && !s.hideImage).length;
+  const npage = nmock.pages[0] || {};
+  const nblocks = npage.children || [];
+  check(npage.parent?.page_id === 'p-topic2' && nblocks.some((b) => b.type === 'heading_3'), 'the guide is created as a page inside the chosen subpage', npage.parent?.page_id);
+  check(nmock.uploads === nshots && nmock.sent.length === nshots && nmock.sent.every((x) => x.multipart && x.bytes > 2000), 'each screenshot is uploaded to Notion as a file', `${nmock.sent.length}/${nshots}`);
+  check(nblocks.filter((b) => b.type === 'image').length === nshots, 'image blocks reference the uploaded screenshots');
+  check(nmock.calls.length > 0 && nmock.calls.every((c) => c.version === '2026-03-11' && c.auth === 'Bearer ntn_ext_secret'), 'every Notion call sends the version header and the decrypted secret', `${nmock.calls.length} calls`);
+  const stored = await (async () => {
+    for (const end = Date.now() + 5000; Date.now() < end; await app.waitForTimeout(200)) {
+      const g = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+      if (g.notion?.url) return g.notion;
+    }
+    return null;
+  })();
+  check(stored?.url === 'https://www.notion.so/page-new' && stored.parentPath === FULL, 'the Notion link is kept on the guide', JSON.stringify(stored));
+  await app.click('dialog [data-act="cancel"]');
+
+  // Next time: starts at the last destination (Recent), and can replace the copy.
+  await openNotion();
+  for (const end = Date.now() + 15000; Date.now() < end && !(await nPath()).endsWith('some_topic_2'); ) await app.waitForTimeout(150);
+  const nrecent = await app.evaluate(() => [...document.querySelectorAll('dialog .recent-row')].map((r) => r.textContent));
+  check((await nPath()) === FULL && nrecent[0] === FULL, 'reopening starts at the last destination, listed under Recent', JSON.stringify(nrecent));
+  check(await app.locator('dialog [name="replace"]').isVisible(), 'it offers to replace the copy saved last time');
+  await app.check('dialog [name="replace"]');
+  await app.click('dialog [data-act="save"]');
+  await app.waitForSelector('dialog .done:not([hidden])', { timeout: 30000 });
+  check(nmock.pages.length === 2 && JSON.stringify(nmock.trashed) === '["page-new"]', 'Replace moves the previous copy to Notion\'s trash', JSON.stringify(nmock.trashed));
+  // Catch the new tab instead of opening the real Notion site.
+  await app.evaluate(() => {
+    window.__opened = [];
+    chrome.tabs.create = (opts) => window.__opened.push(opts.url);
+  });
+  await app.click('dialog [data-act="open"]');
+  const opened = await app.evaluate(() => window.__opened);
+  check(JSON.stringify(opened) === '["https://www.notion.so/page-new-2"]', 'Open in Notion opens the new page in a tab', JSON.stringify(opened));
+  await app.click('dialog [data-act="cancel"]');
+  // Later, from the guide's ⋯ menu, using the link kept on the guide.
+  await app.waitForFunction(async (id) => (await window.flowdocApp.getGuide(id)).notion?.url?.endsWith('page-new-2'), guideId);
+  await app.click('[data-act="more"]');
+  await app.click('.menu [role="menuitem"]:has-text("Open in Notion")');
+  const fromMenu = await app.evaluate(() => window.__opened);
+  check(fromMenu.at(-1) === 'https://www.notion.so/page-new-2' && fromMenu.length === 2, '⋯ → Open in Notion opens the saved page later', JSON.stringify(fromMenu));
+
+  // Disconnect removes the secret.
+  await app.evaluate(() => document.querySelector('.settings-btn').click());
+  await app.waitForSelector('dialog .settings [data-act="disconnectNotion"]');
+  await app.click('dialog .settings [data-tab="integrations"]');
+  await app.click('dialog .settings [data-act="disconnectNotion"]');
+  await app.waitForFunction(() => /Disconnected/.test(document.querySelector('dialog .notion-result')?.textContent || ''));
+  check(!('notion' in (await rawKeys())), 'Disconnect removes the Notion secret');
+  await app.click('dialog .settings [data-close]');
 
   // ---------- library ----------
   await app.goto(`chrome-extension://${extId}/app.html#/`);

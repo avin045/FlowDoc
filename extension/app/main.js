@@ -60,7 +60,7 @@ const I = {
 };
 
 const desktop = globalThis.flowdocDesktop;
-// AI (Improve, Translate) works in the desktop app and in the extension.
+// AI (Improve, Translate) and Save to Notion work in the desktop app and in the extension.
 const hasAi = !!aiHost && (isDesktop || isExtension);
 
 // ---------- small UI helpers ----------
@@ -692,7 +692,7 @@ async function renderEditor(id) {
       ${ro ? '' : `<button class="ghost" data-act="highlights" aria-pressed="true">${I.target}<span class="label">Highlights</span></button>`}
       <button class="ghost" data-act="copy" title="Copy the guide as text or Markdown" aria-haspopup="menu">${I.copy}<span class="label">Copy</span></button>
       <button class="ghost" data-act="print">${I.print}<span class="label">Print</span></button>
-      ${isDesktop && !ro ? `<button class="ghost" data-act="notion" title="Save this guide as a Notion page">${I.notion}<span class="label">Notion</span></button>` : ''}
+      ${hasAi && !ro ? `<button class="ghost" data-act="notion" title="Save this guide as a Notion page">${I.notion}<span class="label">Notion</span></button>` : ''}
       <button class="primary" data-act="export">${I.download} Export</button>
       <button class="icon-btn" data-act="more" aria-label="More actions">${I.more}</button>
     </div>
@@ -788,7 +788,7 @@ async function renderEditor(id) {
   );
   $('[data-act="more"]', view).addEventListener('click', (e) =>
     openMenu(e.currentTarget, [
-      ...(isDesktop && current.notion?.url ? [{ label: 'Open in Notion', icon: I.notion, run: () => desktop.openExternal(current.notion.url) }] : []),
+      ...(hasAi && current.notion?.url ? [{ label: 'Open in Notion', icon: I.notion, run: () => aiHost.openExternal(current.notion.url) }] : []),
       { label: 'Duplicate guide', icon: I.dup, run: () => duplicateGuide(current.id) },
       { label: 'Show all screenshots', icon: I.image, run: () => mutate(() => current.steps.forEach((s) => (s.hideImage = false))) },
       { label: 'Hide all screenshots', icon: I.eyeOff, run: () => mutate(() => current.steps.forEach((s) => (s.hideImage = true))) },

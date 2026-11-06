@@ -1,11 +1,11 @@
-// "Save to Notion" (desktop). Connect once with an integration token, then
+// "Save to Notion" (desktop app and extension). Connect once with an integration token, then
 // pick where the guide goes: browse into pages and subpages like folders,
 // reuse a recent destination, or one of up to 10 saved, named locations.
+import { aiHost as host } from './aiHost.js';
 import { buildExportModel, escapeHtml, formatDate, parseRuns } from './render.js';
+import { MAX_SAVED } from '../shared/notionClient.js';
 
-const desktop = globalThis.flowdocDesktop;
 const INTEGRATIONS_URL = 'https://www.notion.so/profile/integrations';
-const MAX_SAVED = 10;
 
 function h(html) {
   const t = document.createElement('template');
@@ -52,11 +52,11 @@ const locationOf = (crumbs) => {
  * @param onSaved ({ pageId, url, parentId, parentPath, savedAt }) — store it on the guide
  */
 export async function openNotionDialog(guide, { toast, onSaved }) {
-  let settings = await desktop.settings.get();
+  let settings = await host.settings.get();
   const dlg = h(`<dialog><div class="dlg notion">
     <h2>Save to Notion</h2>
     <section class="connect" hidden>
-      <p class="sub">Connect FlowDoc to your Notion workspace once. Everything stays between this computer and Notion.</p>
+      <p class="sub">Connect FlowDoc to your Notion workspace once. Your secret stays on this computer, and guides go straight to Notion.</p>
       ${CONNECT_STEPS}
       <div class="inline"><input name="token" type="password" placeholder="ntn_…" autocomplete="off" spellcheck="false"><button class="primary" data-act="connect">Connect</button></div>
       <p class="error-text" hidden></p>
@@ -170,7 +170,7 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
 
   async function storeSaved(list) {
     try {
-      settings = await desktop.notion.setSaved(list);
+      settings = await host.notion.setSaved(list);
       renderPlaces();
       return true;
     } catch (err) {
@@ -187,7 +187,7 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
   // ---------- browsing ----------
 
   async function loadChildren(id) {
-    if (!children.has(id)) children.set(id, await desktop.notion.children(id));
+    if (!children.has(id)) children.set(id, await host.notion.children(id));
     return children.get(id);
   }
 
@@ -261,7 +261,7 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
     const box = $('.tree');
     box.innerHTML = '<div class="empty-tree">Searching…</div>';
     try {
-      const hits = await desktop.notion.pages(q);
+      const hits = await host.notion.pages(q);
       if (seq !== searchSeq) return;
       box.replaceChildren();
       if (!hits.length) box.append(h('<div class="empty-tree">No pages match. Only pages shared with FlowDoc can be found.</div>'));
@@ -272,7 +272,7 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
           pageRow(p, async () => {
             box.innerHTML = '<div class="empty-tree">Opening…</div>';
             try {
-              await goTo(await desktop.notion.path(p.id));
+              await goTo(await host.notion.path(p.id));
             } catch (err) {
               showError('pick', cleanError(err));
             }
@@ -290,7 +290,7 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
     $('[data-act="save"]').disabled = true;
     $('.tree').innerHTML = '<div class="empty-tree">Loading your Notion pages…</div>';
     try {
-      const [me, pages] = await Promise.all([desktop.notion.me(), desktop.notion.pages('')]);
+      const [me, pages] = await Promise.all([host.notion.me(), host.notion.pages('')]);
       settings.workspaceName = me.workspace || me.name;
       $('.who').innerHTML = 'Connected to <b></b>. Open pages and subpages to choose where this guide goes.';
       $('.who b').textContent = settings.workspaceName;
@@ -317,14 +317,14 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
     show('saving');
     $('[data-act="save"]').hidden = true;
     $('[data-act="cancel"]').disabled = true;
-    const off = desktop.notion.onProgress(({ phase, done, total }) => {
+    const off = host.notion.onProgress(({ phase, done, total }) => {
       $('.phase').textContent = phase === 'images' ? 'Uploading screenshots…' : 'Writing the page…';
       $('.bar span').style.width = `${total ? Math.round((done / total) * 100) : 100}%`;
       $('.status').textContent = phase === 'images' ? `${done} of ${total} screenshots` : `${done} of ${total} blocks`;
     });
     try {
       const model = await notionModel(guide, $('[name="images"]').checked);
-      const result = await desktop.notion.save({
+      const result = await host.notion.save({
         parentId: location.id,
         location,
         title: $('[name="title"]').value.trim() || guide.title,
@@ -354,7 +354,7 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
     const token = $('[name="token"]').value.trim();
     if (!token) return showError('connect', 'Paste your integration secret first.');
     showError('connect', '');
-    settings = await desktop.settings.setKey('notion', token);
+    settings = await host.settings.setKey('notion', token);
     loadPicker();
   });
   $('[name="q"]').addEventListener('input', (e) => {
@@ -382,13 +382,13 @@ export async function openNotionDialog(guide, { toast, onSaved }) {
   $('[data-act="saveLoc"]').addEventListener('click', saveLocation);
   $('[name="locName"]').addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), saveLocation()));
   $('[data-act="save"]').addEventListener('click', save);
-  $('[data-act="open"]').addEventListener('click', () => savedUrl && desktop.openExternal(savedUrl));
+  $('[data-act="open"]').addEventListener('click', () => savedUrl && host.openExternal(savedUrl));
   $('[data-act="cancel"]').addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', (e) => {
     const a = e.target.closest('a[data-url]');
     if (a) {
       e.preventDefault();
-      desktop.openExternal(a.dataset.url);
+      host.openExternal(a.dataset.url);
     }
   });
   dlg.addEventListener('close', () => dlg.remove());

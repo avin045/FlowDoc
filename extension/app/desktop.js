@@ -1,7 +1,7 @@
 // Workspace settings and the AI dialogs (Improve with AI, Translate). Settings
 // has a sidebar of sections: General, Capture, Storage (guides folder), AI and
-// Integrations (Notion). The browser extension shows General, Capture and AI
-// (aiHost.js keeps those in the browser profile).
+// Integrations (Notion). The browser extension shows General, Capture, AI and
+// Integrations (aiHost.js keeps those in the browser profile, secrets encrypted).
 import { STYLES, TRANSLATE_PARTS, translationPieces, UI_NAME_MODES, testConnection } from './ai.js';
 import { aiEnabled, aiHost } from './aiHost.js';
 import { cancelJob, estimateRemaining, getJob, onJobChange, startJob } from './aiJobs.js';
@@ -9,7 +9,7 @@ import { findLanguage, INDIAN_LANGUAGES, languageLabel, WORLD_LANGUAGES } from '
 import { CONNECT_STEPS } from './notion.js';
 import { escapeHtml, getHighlightStyle, isNumbered, setHighlightStyle } from './render.js';
 
-const desktop = globalThis.flowdocDesktop; // desktop-only parts: guides folder, Notion, capture
+const desktop = globalThis.flowdocDesktop; // desktop-only parts: guides folder, capture
 export { aiEnabled };
 
 function h(html) {
@@ -33,7 +33,7 @@ const SETTINGS_TABS = [
   { id: 'capture', label: 'Capture' },
   { id: 'storage', label: 'Storage', desktop: true },
   { id: 'ai', label: 'AI' },
-  { id: 'integrations', label: 'Integrations', desktop: true },
+  { id: 'integrations', label: 'Integrations' },
 ];
 const TAB_KEY = 'flowdoc.settingsTab';
 
@@ -53,7 +53,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
   const panel = (id, html) => `<section class="settings-panel" role="tabpanel" id="sp-${id}" aria-labelledby="st-${id}" data-panel="${id}" tabindex="0">${html}</section>`;
   const keyNote = desktop
     ? `<p class="sub">Keys and secrets stay on this computer, encrypted with your system keychain${s.secureStorage ? '' : ' <b>(keychain unavailable: stored obfuscated only)</b>'}.</p>`
-    : '<p class="sub">Your API key is kept in this browser profile only (extension storage, not encrypted). Anyone who can use this browser profile could read it. Remove it any time with <b>Remove key</b>.</p>';
+    : '<p class="sub">Keys and secrets are kept in this browser profile only, encrypted with a key that only this browser can use. Remove them any time.</p>';
   const dlg = h(`<dialog class="settings-dialog"><form class="dlg settings" method="dialog">
     <div class="settings-head"><h2>Settings</h2></div>
     <div class="settings-main">
@@ -156,7 +156,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
       </div>
     </div>`,
     )}
-    ${desktop ? panel('integrations', `
+    ${panel('integrations', `
     ${keyNote}
     <h3>Notion <span class="pill">Optional</span></h3>
     <p class="hint">Save guides as Notion pages, with screenshots, under any page you choose.</p>
@@ -177,7 +177,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
       </div>
     </div>
     <p class="hint more-integrations">AI providers are under <b>AI</b>.</p>
-    `) : ''}
+    `)}
     </div>
     </div>
     <div class="dlg-foot"><button type="button" class="primary" data-close>Done</button></div>
@@ -239,6 +239,10 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
     }
     $('.test-result').textContent = '';
     f.ignoreRepeats.checked = s.capture?.ignoreRepeats !== false;
+    f.notionToken.value = '';
+    f.notionToken.placeholder = s.keys.notion ? 'Connected — paste a new secret to replace it' : 'ntn_…';
+    $('[data-act="disconnectNotion"]').hidden = !s.keys.notion;
+    $('[data-act="testNotion"]').disabled = !s.keys.notion;
     if (!desktop) return;
     f.hideWindow.checked = s.capture.hideWindow;
     f.hideBar.checked = s.capture.hideBar !== false;
@@ -251,10 +255,6 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
     f.typedText.checked = s.capture.typedText;
     f.unknownFieldText.checked = s.capture.unknownFieldText;
     f.unknownFieldText.disabled = !s.capture.typedText;
-    f.notionToken.value = '';
-    f.notionToken.placeholder = s.keys.notion ? 'Connected — paste a new secret to replace it' : 'ntn_…';
-    $('[data-act="disconnectNotion"]').hidden = !s.keys.notion;
-    $('[data-act="testNotion"]').disabled = !s.keys.notion;
   };
 
   // A real <select>: recommended models first, then everything "Load models"
@@ -346,6 +346,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
     btn.disabled = false;
   });
   if (desktop) desktopSettings({ f, $, toast, fill, setS: (v) => (s = v) });
+  notionSettings({ f, $, toast, fill, setS: (v) => (s = v) });
 
   // ---------- click highlight style ----------
   dlg.querySelectorAll('[name="hlStyle"]').forEach((r) => {
@@ -371,7 +372,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
   dlg.querySelector('[role="tab"][aria-selected="true"]')?.focus();
 }
 
-// Guides folder and Notion (desktop app only).
+// Guides folder (desktop app only).
 function desktopSettings({ f, $, toast, fill, setS }) {
   // ---------- guides folder ----------
   let folder = null; // { dir, defaultDir, isDefault, guides, fallback }
@@ -437,10 +438,14 @@ function desktopSettings({ f, $, toast, fill, setS }) {
   });
   renderFolder();
 
+}
+
+// Notion (Settings → Integrations), in the desktop app and the extension.
+function notionSettings({ f, $, toast, fill, setS }) {
   $('[data-act="saveNotion"]').addEventListener('click', async () => {
     const token = f.notionToken.value.trim();
     if (!token) return toast('Paste your Notion secret first', { error: true });
-    setS(await desktop.settings.setKey('notion', token));
+    setS(await aiHost.settings.setKey('notion', token));
     fill();
     $('[data-act="testNotion"]').click();
   });
@@ -448,17 +453,17 @@ function desktopSettings({ f, $, toast, fill, setS }) {
     const out = $('.notion-result');
     out.textContent = 'Testing…';
     try {
-      const me = await desktop.notion.me();
-      const pages = await desktop.notion.pages();
+      const me = await aiHost.notion.me();
+      const pages = await aiHost.notion.pages();
       out.textContent = `✓ Connected to ${me.workspace || me.name} · ${pages.length} page${pages.length === 1 ? '' : 's'} shared with it`;
     } catch (err) {
       out.textContent = `✗ ${cleanError(err)}`;
     }
   });
   $('[data-act="disconnectNotion"]').addEventListener('click', async () => {
-    setS(await desktop.settings.setKey('notion', ''));
+    setS(await aiHost.settings.setKey('notion', ''));
     fill();
-    $('.notion-result').textContent = 'Disconnected. The secret was removed from this computer.';
+    $('.notion-result').textContent = 'Disconnected. The secret was removed.';
   });
 }
 

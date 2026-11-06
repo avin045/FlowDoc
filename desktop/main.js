@@ -7,7 +7,7 @@ import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setKv } from '../extension/shared/guides.js';
 import { complete, listModels } from './ai.js';
-import { listChildPages, listPages, pathTo, saveGuide as saveToNotion, whoAmI } from './notion.js';
+import { listChildPages, listPages, normalizeSaved, pathTo, saveGuide as saveToNotion, whoAmI, withRecent } from './notion.js';
 import { createAreaFrame, createAreaPicker } from './area.js';
 import { createCapture } from './capture.js';
 import { createInspector } from './inspector/index.js';
@@ -410,24 +410,12 @@ function registerIpc() {
   ipcMain.handle('notion:pages', async (_e, query) => listPages(await settings.getKey('notion'), query || ''));
   ipcMain.handle('notion:children', async (_e, pageId) => listChildPages(await settings.getKey('notion'), pageId));
   ipcMain.handle('notion:path', async (_e, pageId) => pathTo(await settings.getKey('notion'), pageId));
-  // Named locations: at most 10, one per page, short names.
-  ipcMain.handle('notion:setSaved', async (_e, list) => {
-    const seen = new Set();
-    const saved = (Array.isArray(list) ? list : [])
-      .filter((x) => x?.id && !seen.has(x.id) && seen.add(x.id))
-      .map((x) => ({ name: String(x.name || x.title || 'Untitled').trim().slice(0, 40), id: x.id, title: x.title, path: x.path, crumbs: x.crumbs }));
-    if (saved.length > 10) throw new Error('You can keep up to 10 saved locations. Remove one first.');
-    return settings.update({ notion: { saved } });
-  });
+  ipcMain.handle('notion:setSaved', async (_e, list) => settings.update({ notion: { saved: normalizeSaved(list) } }));
   ipcMain.handle('notion:save', async (e, req) => {
     const token = await settings.getKey('notion');
     const result = await saveToNotion(token, req, (p) => !e.sender.isDestroyed() && e.sender.send('notion:progress', p));
-    // Remember the destination under Recent (newest first, 5 kept).
-    if (req.location?.id) {
-      const prev = (await settings.get()).notion.recents || [];
-      const recents = [{ ...req.location, usedAt: Date.now() }, ...prev.filter((r) => r.id !== req.location.id)].slice(0, 5);
-      await settings.update({ notion: { recents } });
-    }
+    // Remember the destination under Recent.
+    if (req.location?.id) await settings.update({ notion: { recents: withRecent((await settings.get()).notion.recents, req.location) } });
     return result;
   });
   ipcMain.on('theme:set', (_e, mode) => {

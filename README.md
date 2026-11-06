@@ -2,7 +2,7 @@
 
 Record a process once and get a step-by-step guide with annotated screenshots, in the style of Scribe (scribehow.com). Edit the guide, blur private details, and export it as **PDF, Word (.docx), HTML, Markdown** or a JSON backup. The desktop app can also save guides straight to **Notion**.
 
-Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider (desktop app or extension) or to Notion (desktop app), and both are off by default.
+Everything runs on your computer. There is no account and no server. The only data that ever leaves your machine is what you choose to send to an AI provider (desktop app or extension) or to Notion (desktop app or extension), and both are off by default.
 
 ## Contents
 
@@ -89,7 +89,7 @@ Everything runs on your computer. There is no account and no server. The only da
 | For | You need | Where |
 | --- | --- | --- |
 | AI (Improve with AI and Translate), in the desktop app or the extension | A Google Gemini **or** Groq API key (both have free tiers) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) · [console.groq.com/keys](https://console.groq.com/keys) |
-| Save to Notion from the desktop app | A Notion account and an integration you create | [notion.so/profile/integrations](https://www.notion.so/profile/integrations) |
+| Save to Notion, in the desktop app or the extension | A Notion account and an integration you create | [notion.so/profile/integrations](https://www.notion.so/profile/integrations) |
 
 ---
 
@@ -102,10 +102,10 @@ Everything runs on your computer. There is no account and no server. The only da
 | Install | Run from source, or build an installer | Load the `extension` folder into the browser |
 | Tested | Yes, on Windows (Linux not yet on real hardware) | Automated test in Microsoft Edge only; **not yet tested by hand in Chrome** |
 | What to record | Whole screen, an area, or only the apps you choose | The browser tab you pick |
-| Improve with AI (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual. Key encrypted with your system keychain. | Optional: same styles. Key kept in browser storage, not encrypted. |
+| Improve with AI (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual. Key encrypted with your system keychain. | Optional: same styles. Key kept in browser storage, encrypted (AES-GCM). |
 | Translate a guide | Optional (needs AI) | Optional (needs AI) |
 | Continue capturing | Yes | Yes |
-| Save to Notion | Optional | — |
+| Save to Notion | Optional | Optional |
 | Your own guides folder | Yes | — (stored in the browser) |
 | Click highlight style (Normal / Box only / None) | Yes, in Settings | — (only the per-guide **Highlights** toggle) |
 | Light / Dark / System theme | Yes | Yes |
@@ -323,7 +323,7 @@ AI never runs on its own: a finished capture opens as recorded, and nothing is s
 
 ### A6. Optional: Save guides to Notion
 
-FlowDoc can turn a guide into a Notion page, with every screenshot uploaded, under any page you choose. Each person connects their own workspace. You don't need a FlowDoc account or a developer setup: just a Notion integration you create in two minutes.
+FlowDoc can turn a guide into a Notion page, with every screenshot uploaded, under any page you choose. The extension does the same ([B6](#b6-optional-save-to-notion-from-the-extension)). Each person connects their own workspace. You don't need a FlowDoc account or a developer setup: just a Notion integration you create in two minutes.
 
 **Step 1: Create a Notion integration (one time).**
 
@@ -502,29 +502,39 @@ The extension has the same **✨ Improve with AI** and **Translate** as the desk
 2. Under **AI assistant**, choose **Google Gemini** or **Groq**, paste your key and click **Save key**. [A5](#a5-optional-ai-write-ups-with-gemini-or-groq) explains how to get a key and which model to pick.
 3. Click **Test connection**, then **Done**. **Improve with AI** appears in the guide toolbar, and **Translate** becomes active.
 
-**Where the key is kept:** in this browser profile's extension storage. It isn't encrypted the way the desktop app encrypts it, so anyone who can use this browser profile could read it. **Remove key** in Settings deletes it. Requests go straight from the workspace page to the provider you chose.
+**Where the key is kept:** in this browser profile's extension storage, encrypted. The extension can't use your system keychain the way the desktop app does, so it encrypts every key and secret with AES-GCM: a 256-bit key made by the browser on first use, which no script (FlowDoc's included) can ever read out, kept apart from the encrypted keys. Anyone looking at the extension's storage sees only random bytes. It doesn't stop someone with full access to your Windows account who digs the raw key out of the browser's profile files. Keys saved by an older version are encrypted the first time the workspace opens. **Remove key** in Settings deletes it. Requests go straight from the workspace page to the provider you chose.
 
-### B6. Change the keyboard shortcut
+### B6. Optional: Save to Notion from the extension
+
+The extension saves guides to Notion the same way as the desktop app: the same page picker, **Recent**, saved locations and **Replace the copy saved on …**.
+
+1. Create a Notion integration and share the destination page with it ([A6](#a6-optional-save-guides-to-notion), steps 1 and 3).
+2. In the workspace, click **Settings**, then **Integrations**. Under **Notion**, paste the secret and click **Save**. **Test connection** shows your workspace and how many pages FlowDoc can see.
+3. Open a guide and click **Notion** in the top toolbar. Choose where to save it and click **Save to Notion** ([A6](#a6-optional-save-guides-to-notion), step 4).
+
+The Notion secret is encrypted like the AI keys ([B5](#b5-optional-ai-improve-and-translate-in-the-extension)), and **Disconnect** in Settings removes it. Screenshots and pages go straight from the workspace page to Notion.
+
+### B7. Change the keyboard shortcut
 
 Open `chrome://extensions/shortcuts` (or `edge://extensions/shortcuts`). Find **FlowDoc → Start or stop capturing** and set the key combination you want.
 
-### B7. Update the extension after pulling new code
+### B8. Update the extension after pulling new code
 
 1. Run `git pull` and then `npm install` in the `FlowDoc` folder.
 2. Open `chrome://extensions` and click the **reload** (circular arrow) icon on the FlowDoc card.
 3. Reload any tabs you want to record.
 
-### B8. Troubleshooting (extension)
+### B9. Troubleshooting (extension)
 
 | Problem | Fix |
 | --- | --- |
 | **Start capture** is greyed out | You're on a browser-internal page (`chrome://`, the Web Store, the new-tab page). Open a normal website. |
 | Clicks on a page aren't recorded | Reload the page (F5) once after installing or updating the extension. Clicks inside embedded frames (iframes) aren't supported. |
 | A step has no screenshot | The tab wasn't visible at that moment (for example, you switched tabs very quickly). Use **More → Replace screenshot** on that step, or record it again. |
-| The shortcut does nothing | Another extension may use `Alt+Shift+R`. Change it as described in [B6](#b6-change-the-keyboard-shortcut). |
+| The shortcut does nothing | Another extension may use `Alt+Shift+R`. Change it as described in [B7](#b7-change-the-keyboard-shortcut). |
 | "Load unpacked" shows an error about missing files | Run `npm install` first, so that `extension/vendor/` exists. |
 
-### B9. Uninstall
+### B10. Uninstall
 
 Open `chrome://extensions` and click **Remove** on the FlowDoc card. This also deletes the guides stored in the extension, so export backups first if you want to keep them.
 
@@ -704,7 +714,7 @@ npm test
 npm run test:desktop
 ```
 
-- **`npm test`** loads the extension in Chromium and records a sign-in and ticket flow on the demo site. It then edits the guide (title, tip, redaction, reorder, undo/redo), exports all five formats and validates every file.
+- **`npm test`** loads the extension in Chromium and records a sign-in and ticket flow on the demo site. It then edits the guide (title, tip, redaction, reorder, undo/redo), exports all five formats and validates every file. It also saves the guide to a mock Notion, and checks that keys and secrets are stored encrypted (and that older plain keys get encrypted).
   - Chrome 137 and later ignore `--load-extension`. To use an installed Edge instead, run `$env:BROWSER='msedge'; npm test` (PowerShell) or `BROWSER=msedge npm test` (bash).
 - **`npm run test:desktop`** launches the desktop app and opens the demo site in a window. It feeds the recorder hook events at real element positions, so screen capture and the accessibility inspector run for real without moving your mouse. It also:
   - checks step text, password masking, double-click, right-click and shortcuts;
@@ -735,7 +745,7 @@ desktop/
   capture.js           live screen streams, instant frame grabs (capture.html/-renderer.js)
   inspector/           UI Automation (windows.ps1) / AT-SPI (linux.py) helpers
   ai.js                Gemini + Groq clients, model fallback (main process only)
-  notion.js            Notion client: search pages, upload screenshots, create the page
+  notion.js            Notion client (from extension/shared/notionClient.js)
   settings.js          settings + keychain-encrypted API keys
   store.js             JSON file store under the user-data folder
   widget.html/js       floating recorder bar
@@ -752,10 +762,14 @@ extension/
   app/exporters/       pdf.js, docx.js, html.js, markdown.js
   app/ai.js            writing styles (Crisp/Elaborate/Conceptual), prompts, guard rails
   app/aiJobs.js        background AI jobs with progress and time estimates
-  app/desktop.js       settings and "Improve with AI" dialogs (desktop)
-  app/notion.js        Save to Notion dialog and page picker (desktop)
+  app/desktop.js       settings and "Improve with AI" dialogs
+  app/aiHost.js        settings, keys and requests: desktop main process, or the extension's storage
+  app/notion.js        Save to Notion dialog and page picker
   app/theme.js         System / Light / Dark theme, applied before first paint
   shared/guides.js     storage (chrome.storage, desktop file store or IndexedDB)
+  shared/aiClient.js   Gemini + Groq clients, model fallback (desktop and extension)
+  shared/notionClient.js  Notion client: search pages, upload screenshots, create the page
+  shared/secretStore.js   AES-GCM encryption of the extension's keys and secrets
 demo/                  practice site
 scripts/               vendor copy, icon render, static server, tests
 ```
