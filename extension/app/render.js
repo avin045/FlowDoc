@@ -30,6 +30,13 @@ export function setHighlightStyle(style) {
 
 // ---------- text ----------
 
+// A step's link, if it is one that may be shown and opened: web pages and
+// local files only (never javascript: or data: links, whatever a guide holds).
+export function safeLink(url) {
+  const u = String(url ?? '').trim();
+  return /^(https?|file):/i.test(u) ? u : '';
+}
+
 export function escapeHtml(text) {
   return String(text ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
@@ -268,7 +275,7 @@ export async function buildExportModel(guide, { images = true, maxWidth = 1600 }
   let n = 0;
   const blocks = [];
   for (const step of guide.steps) {
-    const block = { kind: step.kind, text: step.text || '', note: step.note || '', url: step.href || '' };
+    const block = { kind: step.kind, text: step.text || '', note: step.note || '', url: safeLink(step.href) };
     if (isNumbered(step)) {
       block.number = ++n;
       if (images && step.screenshot && !step.hideImage) block.image = await renderStepImage(step, { maxWidth });

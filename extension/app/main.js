@@ -15,7 +15,7 @@ import { aiEnabled, cleanError, openImproveDialog, openNeedsAiDialog, openSettin
 import { languageLabel } from './languages.js';
 import { exportGuide, FORMATS, guideToClipboardMarkdown, guideToPlainText, parseImport, printGuide } from './exporters/index.js';
 import { openImageEditor } from './imageEditor.js';
-import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, releaseStepImages, renderStepCanvas, richToHtml, stepImageUrl } from './render.js';
+import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, releaseStepImages, renderStepCanvas, richToHtml, safeLink, stepImageUrl } from './render.js';
 import { openNotionDialog } from './notion.js';
 import { makeSampleGuide } from './sample.js';
 
@@ -1201,9 +1201,9 @@ function blockEl(step, index, number, ro) {
     if (!ro) wireEditable(note, step, 'note', { rich: true });
     body.append(note);
 
-    if (step.href && step.action === 'navigate') {
-      const a = h('<a class="b-url" target="_blank" rel="noopener"></a>');
-      a.href = step.href;
+    if (safeLink(step.href) && step.action === 'navigate') {
+      const a = h('<a class="b-url" target="_blank" rel="noopener noreferrer"></a>');
+      a.href = safeLink(step.href);
       a.textContent = step.href;
       body.append(a);
     }

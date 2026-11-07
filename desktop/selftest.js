@@ -4,7 +4,7 @@
 // the user's mouse), exercises AI enhancement against a mock server, runs the
 // exporters inside the workspace, and writes results.json for the runner.
 import { BrowserWindow, desktopCapturer, nativeImage, nativeTheme, screen } from 'electron';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -180,8 +180,25 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   await type('Printer offline');
   key(K.Enter);
   await sleep(900);
+  // A double-click is one step with one screenshot, the one taken at its first
+  // press: the second press only relabels that step.
+  const libraryDir = (await mainWin.webContents.executeJavaScript('window.flowdocDesktop.storage.get()')).dir;
+  const shotState = async () => {
+    const g = await getGuide(recorder.state.guideId);
+    const last = g.steps.at(-1);
+    return {
+      steps: g.steps.length,
+      shots: g.steps.filter((st) => st.screenshot).length,
+      files: readdirSync(join(libraryDir, 'assets')).length,
+      last: { action: last?.action, text: last?.text, screenshot: last?.screenshot || null },
+    };
+  };
+  await recorder.drain();
+  const dblBefore = await shotState();
   await click('h1', { clicks: 1 });
   await click('h1', { clicks: 2 });
+  await recorder.drain();
+  results.doubleClick = { before: dblBefore, after: await shotState() };
   await click('#details', { button: 2 });
   key(K.S, { ctrlKey: true });
   await sleep(1200);

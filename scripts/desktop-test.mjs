@@ -193,6 +193,12 @@ check(!r.rawContainsPassword, 'password never stored');
 check(texts.some((t) => /Remember me/.test(t)), 'checkbox click captured');
 check(texts.some((t) => /Sign in/.test(t)), 'button click captured');
 check(texts.some((t) => t.startsWith('Double-click')), 'double-click merged into one step');
+{
+  const d = r.doubleClick || {};
+  const added = { steps: d.after?.steps - d.before?.steps, shots: d.after?.shots - d.before?.shots, files: d.after?.files - d.before?.files };
+  check(added.steps === 1 && d.after?.last?.action === 'dblclick' && /^Double-click/.test(d.after.last.text), 'a double-click adds exactly one step (no separate click step)', JSON.stringify({ added, last: d.after?.last?.text }));
+  check(added.shots === 1 && !!d.after?.last?.screenshot && added.files <= 1, 'the second press of a double-click takes no screenshot of its own', JSON.stringify(added));
+}
 check(texts.some((t) => t.startsWith('Right-click')), 'right-click captured');
 check(texts.some((t) => t === 'Press **Enter**'), 'Enter key captured');
 check(texts.some((t) => t === 'Press **Ctrl+S**'), 'keyboard shortcut captured');

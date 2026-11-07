@@ -1,6 +1,7 @@
 // FlowDoc desktop (Windows + Linux). Hosts the same workspace UI as the
 // browser extension, but records clicks and keystrokes in every application
 // (file manager, browsers, Office, settings...) instead of one browser tab.
+import './env.js'; // first: drops test-only settings from a normal launch
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray } from 'electron';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';

@@ -315,7 +315,7 @@ AI never runs on its own: a finished capture opens as recorded, and nothing is s
 
 - **What is sent:** each step's screenshot (cropped around the click) and its text go to the provider you chose, under that provider's terms. Don't use it on guides containing data you're not allowed to share. Blur the screenshots first ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
 - **Guard rails:** the AI may reword a step, but it can never add a typed value that wasn't recorded. A made-up password, for example, is automatically rejected, and the original wording is kept.
-- **Key storage:** your API key is encrypted with your system keychain (Windows DPAPI; GNOME Keyring or KWallet on Linux) and never leaves FlowDoc's main process.
+- **Key storage:** your API key is encrypted with your system keychain (Windows DPAPI; GNOME Keyring or KWallet on Linux) and never leaves FlowDoc's main process. On Linux without a keyring, Settings warns that keys are only obfuscated; install and unlock GNOME Keyring or KWallet, then save the keys again.
 - **Speed:** Crisp sends the step text only. Elaborate and Conceptual send 5 steps per request for Gemini (3 for Groq, which accepts at most 3 images), several requests at once, and the title is written at the same time. FlowDoc also turns the models' "thinking" down (minimal or low thinking for Gemini, `reasoning_effort: none` for Groq Qwen), because guide text doesn't need deep reasoning.
 - **Automatic fallback:** if the chosen Gemini model is overloaded (503) or out of quota (429), that request moves to `gemini-3.6-flash` and then `gemini-3.5-flash-lite` straight away. The final message tells you when another model answered. **Test connection** in Settings shows which model answered and how long it took. A slow model is never cut off; the only limit is a 10-minute safety net per request against connections that hang forever.
 - **Failures:** steps that did come back are still applied. If nothing comes back, the dialog stays open with the reason and a **Try again** button.
@@ -717,7 +717,8 @@ npm run test:desktop
 - **`npm test`** loads the extension in Chromium and records a sign-in and ticket flow on the demo site. It then edits the guide (title, tip, redaction, reorder, undo/redo), exports all five formats and validates every file. It also saves the guide to a mock Notion, and checks that keys and secrets are stored encrypted (and that older plain keys get encrypted).
   - Chrome 137 and later ignore `--load-extension`. To use an installed Edge instead, run `$env:BROWSER='msedge'; npm test` (PowerShell) or `BROWSER=msedge npm test` (bash).
 - **`npm run test:desktop`** launches the desktop app and opens the demo site in a window. It feeds the recorder hook events at real element positions, so screen capture and the accessibility inspector run for real without moving your mouse. It also:
-  - checks step text, password masking, double-click, right-click and shortcuts;
+  - checks step text, password masking, double-click (one step, one screenshot), right-click and shortcuts;
+  - checks that screenshots are stored as image files, and the workspace's lockdown: its security policy, import cleaning, blocked navigation and refused permissions;
   - runs **Improve with AI** in all three styles against mock Gemini and Groq servers, including a background run that finishes after you've left the guide, and checks keys, models, JSON mode, model fallback and the no-invented-values guard;
   - checks the model dropdown, the theme switch, the custom guides folder, and data carried over from an older data folder;
   - saves the guide to a mock Notion server, checking the version header, multipart uploads, the parent page and block chunking;
@@ -725,7 +726,11 @@ npm run test:desktop
 
   A demo window briefly appears on screen while it runs. To test a packaged build, set `FLOWDOC_APP_EXE` to the path of `FlowDoc.exe`.
 
+  The test's own settings (`FLOWDOC_SELFTEST`, the mock server URLs and the like) only take effect together with a separate data folder (`FLOWDOC_USER_DATA`), and mock URLs only on `localhost`. A normal launch ignores them, so they can't redirect your API keys or run the test on your real guides.
+
 Results and screenshots from both tests go to `test-output/`.
+
+**Hardened builds.** The installers turn off Electron features FlowDoc doesn't use (Electron "fuses"): the app can't be started as a plain Node.js runtime, ignores `NODE_OPTIONS` and `--inspect`, loads its code only from `app.asar`, and refuses to start if `app.asar` was changed after the build. To check a build: `npx electron-fuses read --app <path to FlowDoc.exe>`.
 
 ### How the desktop recorder works
 

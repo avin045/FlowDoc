@@ -376,6 +376,39 @@ try {
   check(howMany(repOff, /Refresh/) === 2, 'with the setting off, every click is a step again', repOff.join(' / '));
   await control.evaluate(() => chrome.storage.local.remove('flowdoc_capture'));
 
+  // A double-click is one step whose screenshot is taken at the first press;
+  // the second press takes none. Screenshots are counted where they are taken.
+  {
+    await worker.evaluate(() => {
+      self.__flowdocShots = 0;
+      if (!self.__flowdocCapture) {
+        self.__flowdocCapture = chrome.tabs.captureVisibleTab.bind(chrome.tabs);
+        chrome.tabs.captureVisibleTab = (...args) => {
+          self.__flowdocShots++;
+          return self.__flowdocCapture(...args);
+        };
+      }
+    });
+    const id = (await send({ type: 'start', tabId })).guideId;
+    await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+    await page.waitForTimeout(1200);
+    const stepsOf = async () => (await control.evaluate(async (gid) => (await import('/shared/guides.js')).getGuide(gid), id)).steps;
+    const before = await stepsOf();
+    const shotsBefore = await worker.evaluate(() => self.__flowdocShots);
+    await page.dblclick('#count');
+    await page.waitForTimeout(2200);
+    const after = await stepsOf();
+    const shots = (await worker.evaluate(() => self.__flowdocShots)) - shotsBefore;
+    const added = after.slice(before.length);
+    const done = context.waitForEvent('page');
+    await send({ type: 'stop' });
+    await (await done).close();
+    await control.evaluate(async (gid) => (await import('/shared/guides.js')).deleteGuide(gid), id);
+    const summary = JSON.stringify({ added: added.map((st) => `${st.action}: ${st.text}${st.screenshot ? ' [shot]' : ''}`), shots });
+    check(added.length === 1 && added[0].action === 'dblclick' && /^Double-click \*\*Add one/.test(added[0].text), 'a double-click adds exactly one step (no separate click step)', summary);
+    check(!!added[0]?.screenshot && shots === 1, 'the second press of a double-click takes no screenshot of its own', summary);
+  }
+
   // ---------- copy menu ----------
   console.log('\nCopy as text or Markdown');
   await app.bringToFront();
