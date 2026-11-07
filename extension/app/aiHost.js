@@ -1,5 +1,5 @@
 // Where the settings, secrets and API requests live (AI and Notion).
-// Desktop: the main process (secrets encrypted with the system keychain).
+// Desktop: the main process (secrets encrypted by the operating system).
 // Extension: this browser profile's extension storage, secrets encrypted
 // with a key only the browser can use (secretStore.js), and requests go
 // straight from the workspace page to the provider or Notion.

@@ -12,7 +12,7 @@ Everything runs on your computer. There is no account and no server. The only da
 2. [Which version should I use?](#2-which-version-should-i-use)
 3. [Get the code](#3-get-the-code)
 4. [Guide A: Desktop app (Windows and Linux)](#guide-a-desktop-app-windows-and-linux) (recommended)
-5. [Guide B: Chrome / Edge extension](#guide-b-chrome--edge-extension) (not yet tested in Chrome)
+5. [Guide B: Chrome / Edge extension](#guide-b-chrome--edge-extension)
 6. [Guide C: Editing and exporting a guide](#guide-c-editing-and-exporting-a-guide) (the same in both versions)
 7. [Web workspace (no install)](#web-workspace-no-install)
 8. [For developers](#for-developers)
@@ -100,9 +100,9 @@ Everything runs on your computer. There is no account and no server. The only da
 | Records | Clicks and typing in **any app**: File Explorer / Files, browsers, Office, Settings, terminals… | Clicks and typing inside **browser tabs** |
 | Platforms | Windows 10/11, Linux (X11 session) | Chrome, Edge (Windows, Linux, macOS) |
 | Install | Run from source, or build an installer | Load the `extension` folder into the browser |
-| Tested | Yes, on Windows (Linux not yet on real hardware) | Automated test in Microsoft Edge only; **not yet tested by hand in Chrome** |
+| Tested | Yes, on Windows (Linux not yet on real hardware) | Yes, by hand in Google Chrome; automated test in Microsoft Edge |
 | What to record | Whole screen, an area, or only the apps you choose | The browser tab you pick |
-| Improve with AI (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual. Key encrypted with your system keychain. | Optional: same styles. Key kept in browser storage, encrypted (AES-GCM). |
+| Improve with AI (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual. Key encrypted by your operating system (DPAPI on Windows, GNOME Keyring or KWallet on Linux). | Optional: same styles. Key kept in browser storage, encrypted (AES-GCM). |
 | Translate a guide | Optional (needs AI) | Optional (needs AI) |
 | Continue capturing | Yes | Yes |
 | Save to Notion | Optional | Optional |
@@ -315,7 +315,7 @@ AI never runs on its own: a finished capture opens as recorded, and nothing is s
 
 - **What is sent:** each step's screenshot (cropped around the click) and its text go to the provider you chose, under that provider's terms. Don't use it on guides containing data you're not allowed to share. Blur the screenshots first ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
 - **Guard rails:** the AI may reword a step, but it can never add a typed value that wasn't recorded. A made-up password, for example, is automatically rejected, and the original wording is kept.
-- **Key storage:** your API key is encrypted with your system keychain (Windows DPAPI; GNOME Keyring or KWallet on Linux) and never leaves FlowDoc's main process. On Linux without a keyring, Settings warns that keys are only obfuscated; install and unlock GNOME Keyring or KWallet, then save the keys again.
+- **Key storage:** your API key is encrypted by your operating system (DPAPI on Windows, GNOME Keyring or KWallet on Linux) and never leaves FlowDoc's main process. On Linux without a keyring, Settings warns that keys are only obfuscated; install and unlock GNOME Keyring or KWallet, then save the keys again.
 - **Speed:** Crisp sends the step text only. Elaborate and Conceptual send 5 steps per request for Gemini (3 for Groq, which accepts at most 3 images), several requests at once, and the title is written at the same time. FlowDoc also turns the models' "thinking" down (minimal or low thinking for Gemini, `reasoning_effort: none` for Groq Qwen), because guide text doesn't need deep reasoning.
 - **Automatic fallback:** if the chosen Gemini model is overloaded (503) or out of quota (429), that request moves to `gemini-3.6-flash` and then `gemini-3.5-flash-lite` straight away. The final message tells you when another model answered. **Test connection** in Settings shows which model answered and how long it took. A slow model is never cut off; the only limit is a 10-minute safety net per request against connections that hang forever.
 - **Failures:** steps that did come back are still applied. If nothing comes back, the dialog stays open with the reason and a **Try again** button.
@@ -358,7 +358,7 @@ In Notion, open the page where guides should go (for example "Team wiki"), click
 
 Saving the same guide again creates a new page. Tick **Replace the copy saved on …** to move the previous copy to Notion's trash at the same time.
 
-In Notion, each step becomes a numbered heading with the element name in bold, followed by its note and its screenshot (no captions). Section headings, tips and alerts become Notion headings and callouts. Your Notion secret is encrypted with your system keychain, like the AI keys; **Disconnect** in Settings removes it.
+In Notion, each step becomes a numbered heading with the element name in bold, followed by its note and its screenshot (no captions). Section headings, tips and alerts become Notion headings and callouts. Your Notion secret is encrypted by your operating system, like the AI keys; **Disconnect** in Settings removes it.
 
 ### A7. Capture settings
 
@@ -439,7 +439,7 @@ Your settings, API keys and Notion secret always stay in the app's data folder; 
 
 ## Guide B: Chrome / Edge extension
 
-> ⚠️ **Not yet tested in Google Chrome.** The extension has only been checked by an automated test that runs it in Microsoft Edge. Nobody has tried it by hand in Chrome yet, so expect rough edges, and please report anything that doesn't work. If you can, use the [desktop app](#guide-a-desktop-app-windows-and-linux) instead: it has been tested on Windows and records far more.
+> Tested by hand in Google Chrome, and by an automated test in Microsoft Edge. For work outside the browser (File Explorer, Office, settings…), use the [desktop app](#guide-a-desktop-app-windows-and-linux).
 
 ### B1. Install the extension
 
@@ -502,7 +502,7 @@ The extension has the same **✨ Improve with AI** and **Translate** as the desk
 2. Under **AI assistant**, choose **Google Gemini** or **Groq**, paste your key and click **Save key**. [A5](#a5-optional-ai-write-ups-with-gemini-or-groq) explains how to get a key and which model to pick.
 3. Click **Test connection**, then **Done**. **Improve with AI** appears in the guide toolbar, and **Translate** becomes active.
 
-**Where the key is kept:** in this browser profile's extension storage, encrypted. The extension can't use your system keychain the way the desktop app does, so it encrypts every key and secret with AES-GCM: a 256-bit key made by the browser on first use, which no script (FlowDoc's included) can ever read out, kept apart from the encrypted keys. Anyone looking at the extension's storage sees only random bytes. It doesn't stop someone with full access to your Windows account who digs the raw key out of the browser's profile files. Keys saved by an older version are encrypted the first time the workspace opens. **Remove key** in Settings deletes it. Requests go straight from the workspace page to the provider you chose.
+**Where the key is kept:** in this browser profile's extension storage, encrypted. The extension can't use your operating system's encryption (DPAPI on Windows) the way the desktop app does, so it encrypts every key and secret with AES-GCM: a 256-bit key made by the browser on first use, which no script (FlowDoc's included) can ever read out, kept apart from the encrypted keys. Anyone looking at the extension's storage sees only random bytes. It doesn't stop someone with full access to your Windows account who digs the raw key out of the browser's profile files. Keys saved by an older version are encrypted the first time the workspace opens. **Remove key** in Settings deletes it. Requests go straight from the workspace page to the provider you chose.
 
 ### B6. Optional: Save to Notion from the extension
 
@@ -766,7 +766,7 @@ desktop/
   inspector/           UI Automation (windows.ps1) / AT-SPI (linux.py) helpers
   ai.js                Gemini + Groq clients, model fallback (main process only)
   notion.js            Notion client (from extension/shared/notionClient.js)
-  settings.js          settings + keychain-encrypted API keys
+  settings.js          settings + API keys encrypted by the OS
   store.js             JSON file store under the user-data folder
   widget.html/js       floating recorder bar
   selftest.js          desktop self-test (npm run test:desktop)
@@ -805,11 +805,10 @@ scripts/               vendor copy, icon render, static server, tests
   - Apps running as administrator can't be inspected from a non-elevated FlowDoc. Their clicks are still captured, with generic text.
   - A password field is known only once you've clicked or typed in it; one the browser filled in by itself may still show its dots in screenshots (never the password).
 - **Extension**
-  - Not yet tested by hand in Google Chrome; only an automated test in Microsoft Edge has run.
   - Clicks inside iframes and on browser-internal pages (`chrome://`, the Web Store) aren't recorded.
   - Password fields inside a frame from another website aren't covered in screenshots.
   - The built-in PDF export shows non-Latin scripts (Tamil, Hindi, Arabic…) as images of the text, so that text can't be selected or searched. **Print → Save as PDF** keeps it selectable.
-  - Your AI key and Notion secret are kept in the browser profile, encrypted with a browser-held key; the desktop app uses the system keychain instead.
+  - Your AI key and Notion secret are kept in the browser profile, encrypted with a browser-held key; the desktop app has them encrypted by your operating system (DPAPI on Windows, GNOME Keyring or KWallet on Linux) instead.
 - **Both:** there is no cloud sharing or share links. Share the exported files instead.
 
 ---

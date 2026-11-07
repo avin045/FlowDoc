@@ -53,8 +53,8 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
   const panel = (id, html) => `<section class="settings-panel" role="tabpanel" id="sp-${id}" aria-labelledby="st-${id}" data-panel="${id}" tabindex="0">${html}</section>`;
   const keyNote = desktop
     ? s.secureStorage
-      ? '<p class="sub">Keys and secrets stay on this computer, encrypted with your system keychain.</p>'
-      : '<p class="sub">Keys and secrets stay on this computer, but <b class="keychain-warning">no system keychain was found, so they are only obfuscated: anyone who can read your files can read them.</b> On Linux, install and unlock GNOME Keyring or KWallet, then save the keys again.</p>'
+      ? '<p class="sub">Keys and secrets stay on this computer, encrypted by your operating system (DPAPI on Windows, GNOME Keyring or KWallet on Linux).</p>'
+      : '<p class="sub">Keys and secrets stay on this computer, but <b class="keychain-warning">no keyring (GNOME Keyring or KWallet) was found, so they are only obfuscated: anyone who can read your files can read them.</b> On Linux, install and unlock GNOME Keyring or KWallet, then save the keys again.</p>'
     : '<p class="sub">Keys and secrets are kept in this browser profile only, encrypted with a key that only this browser can use. Remove them any time.</p>';
   const dlg = h(`<dialog class="settings-dialog"><form class="dlg settings" method="dialog">
     <div class="settings-head"><h2>Settings</h2></div>
