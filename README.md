@@ -259,7 +259,7 @@ Element names come from the operating system's accessibility features: UI Automa
 
 ### A4. Privacy while recording
 
-- **Passwords:** password fields are detected and their contents are never saved, in the step text or in a screenshot. Every screenshot has the password fields on screen pixelated out of the stored image itself, so not even the dots (and the password's length) show. A field stays a password field after you click **Show password**, and fields labelled as passwords (in English, Tamil, Hindi and many other languages) count too. Screenshots taken before this version keep what they show; use **Edit screenshot** to blur a password in them.
+- **Passwords:** never saved, in the step text or in a screenshot. Password fields are covered in every screenshot before it is stored (not even the dots show), also after you click **Show password**. Guides recorded before this protection was added keep what their screenshots show; use **Edit screenshot** to blur a password in them. Details: [How passwords are kept out of guides](#how-passwords-are-kept-out-of-guides).
 - **The recorder bar** never appears in FlowDoc's screenshots. On Windows it is hidden from all screen captures by default. If you make it visible to other apps ([A7](#a7-capture-settings)), FlowDoc still leaves it out of its own screenshots: at each step it hides the bar from captures for a moment (about a fifth of a second) and fills in what is behind it, so people watching may see the bar blink once per step. On Linux, where windows can't be hidden from captures, FlowDoc blurs the bar out of each step's screenshot instead (you can remove the blur in the screenshot editor).
 - **Clicks inside FlowDoc's own windows** are ignored.
 - **Screenshots:** if one shows something private, blur it afterwards with the screenshot editor ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
@@ -717,7 +717,7 @@ npm run test:desktop
 - **`npm test`** loads the extension in Chromium and records a sign-in and ticket flow on the demo site. It then edits the guide (title, tip, redaction, reorder, undo/redo), exports all five formats and validates every file. It also saves the guide to a mock Notion, and checks that keys and secrets are stored encrypted (and that older plain keys get encrypted).
   - Chrome 137 and later ignore `--load-extension`. To use an installed Edge instead, run `$env:BROWSER='msedge'; npm test` (PowerShell) or `BROWSER=msedge npm test` (bash).
 - **`npm run test:desktop`** launches the desktop app and opens the demo site in a window. It feeds the recorder hook events at real element positions, so screen capture and the accessibility inspector run for real without moving your mouse. It also:
-  - checks step text, password masking (also after **Show password**, and pixelated out of every screenshot), double-click (one step, one screenshot), right-click and shortcuts;
+  - checks step text, password masking (also after **Show password**, and covered in every screenshot), double-click (one step, one screenshot), right-click and shortcuts;
   - checks that screenshots are stored as image files, and the workspace's lockdown: its security policy, import cleaning, blocked navigation and refused permissions;
   - runs **Improve with AI** in all three styles against mock Gemini and Groq servers, including a background run that finishes after you've left the guide, and checks keys, models, JSON mode, model fallback and the no-invented-values guard;
   - checks the model dropdown, the theme switch, the custom guides folder, and data carried over from an older data folder;
@@ -740,6 +740,21 @@ Results and screenshots from both tests go to `test-output/`.
   - **Windows:** UI Automation, through a long-running PowerShell helper (`desktop/inspector/windows.ps1`).
   - **Linux:** AT-SPI, through `desktop/inspector/linux.py`, with `xdotool` as a fallback.
 - **AI calls** run in the main process (`desktop/ai.js`), so API keys never reach the web page.
+
+### How passwords are kept out of guides
+
+- **Which fields count:** a field the system or browser reports as a password field; one that was a password field earlier in the capture (so it still counts after **Show password** turns it into plain text); one labelled as a password or PIN (English, Tamil, Hindi and many other languages); in the extension, also `autocomplete="current-password"` / `"new-password"`.
+- **Step text:** typing in such a field always becomes "Type your password in the **…** field". The value is never stored; keystrokes stay in memory only.
+- **Screenshots:** every password field on screen is covered *in the image itself*, before the step is saved, so the original pixels never reach the guide, backups, exports, AI or Notion.
+  - **Desktop:** the recorder remembers each field's position per window (following the window if it moves) and the hidden capture window paints over it (`desktop/recorder.js`, `desktop/capture-renderer.js`).
+  - **Extension:** the page script finds the password fields on screen, including inside web components and same-site frames, and sends their boxes with each step; the background worker paints over them (`extension/content.js`, `extension/background.js`).
+- **Safeguards:**
+  - The cover is one solid colour taken from just outside the field, with a thin outline: nothing inside is used, so neither characters, dots nor the password's length survive.
+  - If covering fails, the step is kept **without** a screenshot rather than with one showing a password.
+  - Boxes sent by a web page are validated and capped at 20, so a page can only make FlowDoc cover more, never less.
+  - Desktop: when the element under the pointer can't be identified, every known password field on that display is covered.
+- **Limits:** the extension can't look inside a frame from another website, so a password field there isn't covered. The desktop app knows a password field only once you've clicked or typed in it, so a field the browser filled in by itself may still show its dots (never the password).
+- **Tests:** both suites record a **Show password** scenario and check the masked text, a covered field in every shot, and one flat colour where the revealed password was.
 
 ### Project layout
 
@@ -788,11 +803,13 @@ scripts/               vendor copy, icon render, static server, tests
   - macOS isn't packaged yet.
   - Plain text labels on web pages (for example, clicking the words next to a checkbox) sometimes resolve only to the page title. **Improve with AI** names them correctly from the screenshot.
   - Apps running as administrator can't be inspected from a non-elevated FlowDoc. Their clicks are still captured, with generic text.
+  - A password field is known only once you've clicked or typed in it; one the browser filled in by itself may still show its dots in screenshots (never the password).
 - **Extension**
   - Not yet tested by hand in Google Chrome; only an automated test in Microsoft Edge has run.
   - Clicks inside iframes and on browser-internal pages (`chrome://`, the Web Store) aren't recorded.
+  - Password fields inside a frame from another website aren't covered in screenshots.
   - The built-in PDF export shows non-Latin scripts (Tamil, Hindi, Arabic…) as images of the text, so that text can't be selected or searched. **Print → Save as PDF** keeps it selectable.
-  - Your AI key is stored in the browser profile without encryption (the desktop app encrypts it).
+  - Your AI key and Notion secret are kept in the browser profile, encrypted with a browser-held key; the desktop app uses the system keychain instead.
 - **Both:** there is no cloud sharing or share links. Share the exported files instead.
 
 ---

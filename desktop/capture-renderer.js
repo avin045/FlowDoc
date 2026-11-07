@@ -184,35 +184,45 @@ window.flowdocCapture.onDiff(({ id, a, b, region, masks }) => {
 
 // ---------- password fields ----------
 
-// Pixelates password fields into a screenshot, with blocks as tall as the
-// field: no character, dot or length survives (recorder.js hideSecrets).
-async function pixelateBoxes(dataUrl, boxes) {
+// Covers password fields in a screenshot (recorder.js hideSecrets) with the
+// colour just outside each box's corners (the page around the field) and a
+// thin outline. Nothing inside the box is used, so no character, dot or
+// length of the password survives.
+function coverBox(g, b) {
+  const W = g.canvas.width;
+  const H = g.canvas.height;
+  const at = (x, y) => g.getImageData(Math.min(W - 1, Math.max(0, x)), Math.min(H - 1, Math.max(0, y)), 1, 1).data;
+  const corners = [at(b.x, b.y), at(b.x + b.w - 1, b.y), at(b.x, b.y + b.h - 1), at(b.x + b.w - 1, b.y + b.h - 1)];
+  const rgb = [0, 1, 2].map((i) => Math.round(corners.reduce((sum, c) => sum + c[i], 0) / corners.length));
+  g.fillStyle = 'rgb(' + rgb.join(',') + ')';
+  g.fillRect(b.x, b.y, b.w, b.h);
+  const line = Math.max(1, Math.round(b.h / 30));
+  g.strokeStyle = 'rgba(100, 116, 139, 0.8)';
+  g.lineWidth = line;
+  g.strokeRect(b.x + line * 2, b.y + line * 2, b.w - line * 4, b.h - line * 4);
+}
+
+async function coverBoxes(dataUrl, boxes) {
   const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
   const c = document.createElement('canvas');
   c.width = bitmap.width;
   c.height = bitmap.height;
-  const g = c.getContext('2d');
+  const g = c.getContext('2d', { willReadFrequently: true });
   g.drawImage(bitmap, 0, 0);
   bitmap.close();
-  for (const f of boxes) {
+  for (const f of boxes.slice(0, 20)) {
+    if (![f?.x, f?.y, f?.w, f?.h].every(Number.isFinite)) continue;
     const x = Math.max(0, Math.floor(f.x * c.width));
     const y = Math.max(0, Math.floor(f.y * c.height));
     const w = Math.min(c.width - x, Math.ceil(f.w * c.width));
     const h = Math.min(c.height - y, Math.ceil(f.h * c.height));
-    if (w <= 0 || h <= 0) continue;
-    const block = Math.max(16, h);
-    const tiny = document.createElement('canvas');
-    tiny.width = Math.max(1, Math.ceil(w / block));
-    tiny.height = Math.max(1, Math.ceil(h / block));
-    tiny.getContext('2d').drawImage(c, x, y, w, h, 0, 0, tiny.width, tiny.height);
-    g.imageSmoothingEnabled = false;
-    g.drawImage(tiny, 0, 0, tiny.width, tiny.height, x, y, w, h);
+    if (w > 0 && h > 0) coverBox(g, { x, y, w, h });
   }
   return encode(c);
 }
 
 window.flowdocCapture.onRedact(({ id, dataUrl, boxes }) => {
-  pixelateBoxes(dataUrl, boxes).then(
+  coverBoxes(dataUrl, boxes).then(
     (out) => window.flowdocCapture.sendRedacted(id, out),
     () => window.flowdocCapture.sendRedacted(id, null),
   );

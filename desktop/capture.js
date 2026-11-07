@@ -159,7 +159,7 @@ export function createCapture({ dir, log = () => {} }) {
     });
   }
 
-  // Pixelates `boxes` (fractions of the image) into a screenshot: password
+  // Covers `boxes` (fractions of the image) in a screenshot: password
   // fields. Returns the new image, or null when the capture window can't.
   function redact(dataUrl, boxes) {
     if (!win || win.isDestroyed() || !dataUrl || !boxes?.length) return Promise.resolve(null);

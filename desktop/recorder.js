@@ -119,7 +119,7 @@ export const NEAR_POINTER_LINE = { x: -90, y: -18, w: 180, h: 34 };
 // field is a password field if the system says so, was one earlier in this
 // capture ("Show password" makes it an ordinary text field), or is named so.
 export const SECRET_NAME =
-  /pass(?:word|wd|code|phrase)|pwd|pin|kennwort|passwort|mot de passe|contrase(?:ñ|n)a|senha|wachtwoord|пароль|密码|密碼|パスワード|비밀번호|पासवर्ड|கடவுச்சொல்|పాస్‌?వర్డ్|ಪಾಸ್‌?ವರ್ಡ್|പാസ്‌?വേഡ്|পাসওয়ার্ড|પાસવર્ડ|ਪਾਸਵਰਡ|كلمة (?:السر|المرور)|סיסמה|şifre|hasło|heslo|jelszó|parola|lösenord|adgangskode|passord|salasana/i;
+  /pass(?:word|wd|code|phrase)|\bpwd\b|\bpin\b|kennwort|passwort|mot de passe|contrase(?:ñ|n)a|senha|wachtwoord|пароль|密码|密碼|パスワード|비밀번호|पासवर्ड|கடவுச்சொல்|పాస్‌?వర్డ్|ಪಾಸ್‌?ವರ್ಡ್|പാസ്‌?വേഡ്|পাসওয়ার্ড|પાસવર્ડ|ਪਾਸਵਰਡ|كلمة (?:السر|المرور)|סיסמה|şifre|hasło|heslo|jelszó|parola|lösenord|adgangskode|passord|salasana/i;
 const TEXT_FIELD = /edit|text|entry/i;
 
 // ---------- text helpers ----------
@@ -282,17 +282,20 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   // Where this capture's password fields are in a shot of `display` taken
   // for `el`, as fractions of the display: those in el's window, moved along
   // with the window if it moved since.
+  // When the element couldn't be identified (the accessibility helper didn't
+  // answer), every known field on the display is covered: better a covered
+  // spot too many than a password in the guide.
   function secretBoxes(el, display) {
-    if (!el || !secrets.size) return [];
-    const app = appKey(el);
-    const win = clean(el.window, 120);
-    const own = secretKey(el);
+    if (!secrets.size) return [];
+    const app = el ? appKey(el) : null;
+    const win = el ? clean(el.window, 120) : null;
+    const own = el ? secretKey(el) : null;
     const db = display.bounds;
     const boxes = [];
     for (const [key, s] of secrets) {
-      if (s.app !== app || s.window !== win) continue;
-      let r = key === own && el.rect?.w > 0 ? el.rect : s.rect;
-      if (r === s.rect && s.topRect && el.topRect?.w > 0) r = { ...r, x: r.x + el.topRect.x - s.topRect.x, y: r.y + el.topRect.y - s.topRect.y };
+      if (el && (s.app !== app || s.window !== win)) continue;
+      let r = el && key === own && el.rect?.w > 0 ? el.rect : s.rect;
+      if (el && r === s.rect && s.topRect && el.topRect?.w > 0) r = { ...r, x: r.x + el.topRect.x - s.topRect.x, y: r.y + el.topRect.y - s.topRect.y };
       const d = rectToDip(r);
       const box = { x: d.x - 4, y: d.y - 4, width: d.width + 8, height: d.height + 8 };
       if (!overlaps(box, db)) continue;
@@ -304,17 +307,22 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     }
     return boxes;
   }
-  // Pixelates the password fields into the step's screenshot itself, so the
-  // stored image never holds them. If that can't be done, they become
-  // ordinary redactions, which every view and export applies.
+  // Covers the password fields in the step's screenshot itself (the capture
+  // window does it), so the stored image never holds them. If that can't be
+  // done, the step keeps no screenshot rather than one showing a password.
   async function hideSecrets(step) {
     const boxes = step.secretBoxes;
     delete step.secretBoxes;
     if (!boxes?.length || !step.screenshot) return;
     const hidden = await capture.redact?.(step.screenshot, boxes).catch(() => null);
-    if (hidden) step.screenshot = hidden;
-    else step.redactions.push(...boxes);
-    step.secretsHidden = boxes.length; // how many password fields were in the shot
+    if (hidden) {
+      step.screenshot = hidden;
+      step.secretsHidden = boxes.length; // how many password fields were in the shot
+    } else {
+      log('could not hide a password field; the step is kept without its screenshot');
+      step.screenshot = null;
+      step.shot = null;
+    }
   }
 
   // When other apps may see the recorder bar, it is kept out of our own shot

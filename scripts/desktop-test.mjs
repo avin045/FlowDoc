@@ -194,7 +194,7 @@ check(!r.rawContainsPassword, 'password never stored');
   const ps = r.passwordShots || {};
   check(ps.secretSteps?.length >= 1 && ps.secretSteps.every((t) => t === 'Type your password in the **Password** field'), 'typing after "Show password" is still a masked password step', JSON.stringify(ps.secretSteps));
   check(ps.signIn?.length >= 3 && ps.signIn.every((st) => st.secretsHidden >= 1), 'every screenshot of the sign-in page hides the password field', JSON.stringify(ps.signIn));
-  check(ps.flat && ps.flat.runs <= ps.flat.maxRuns, 'the stored screenshot has the revealed password pixelated out (no readable characters)', JSON.stringify(ps.flat));
+  check(ps.flat && ps.flat.runs <= 3, 'the stored screenshot has the revealed password covered (no readable characters)', JSON.stringify(ps.flat));
 }
 check(texts.some((t) => /Remember me/.test(t)), 'checkbox click captured');
 check(texts.some((t) => /Sign in/.test(t)), 'button click captured');

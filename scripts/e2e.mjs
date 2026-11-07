@@ -421,6 +421,18 @@ try {
       b.textContent = 'Show password';
       b.addEventListener('click', () => (document.getElementById('password').type = 'text'));
       document.getElementById('password').after(b);
+      // A plain text field that is a secret by its label, and a password
+      // field inside a web component (shadow DOM).
+      const label = document.createElement('label');
+      label.htmlFor = 'pin';
+      label.textContent = 'PIN';
+      const pin = document.createElement('input');
+      pin.id = 'pin';
+      pin.type = 'text';
+      const host = document.createElement('div');
+      host.id = 'shadow-login';
+      host.attachShadow({ mode: 'open' }).innerHTML = '<input type="password" value="inshadow1" style="display:block;width:260px;height:36px">';
+      b.after(label, pin, host);
     });
     const id = (await send({ type: 'start', tabId })).guideId;
     await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
@@ -433,6 +445,9 @@ try {
     await page.click('#password');
     await page.keyboard.type('77', { delay: 20 });
     await page.waitForTimeout(1600);
+    await page.click('#pin');
+    await page.keyboard.type('4321', { delay: 20 });
+    await page.waitForTimeout(1600);
     await page.click('#email');
     await page.waitForTimeout(1200);
     const g = await control.evaluate(async (gid) => (await import('/shared/guides.js')).getGuide(gid), id);
@@ -441,10 +456,13 @@ try {
     await (await done).close();
     await control.evaluate(async (gid) => (await import('/shared/guides.js')).deleteGuide(gid), id);
     const list = g.steps.map((st) => `${st.action}: ${st.text}${st.screenshot ? ` [hidden ${st.secretsHidden || 0}]` : ''}`);
-    const typed = g.steps.filter((st) => st.action === 'type');
+    const typed = g.steps.filter((st) => st.action === 'type' && /\*\*Password\*\*/.test(st.text));
     check(!JSON.stringify(g).includes('s3cretpw') && typed.length >= 1 && typed.every((st) => st.secret && st.text === 'Type your password in the **Password** field'), 'typing after "Show password" is still a masked password step', list.join(' / '));
+    const pinStep = g.steps.find((st) => st.action === 'type' && /PIN/.test(st.text));
+    check(!JSON.stringify(g).includes('4321') && pinStep?.secret && pinStep.value === '', 'a text field labelled "PIN" is treated as a password', pinStep?.text);
     const shots = g.steps.filter((st) => st.action !== 'navigate' && st.screenshot);
     check(shots.length >= 4 && shots.every((st) => st.secretsHidden >= 1), 'every screenshot hides the password field', list.join(' / '));
+    check(shots.at(-1)?.secretsHidden >= 3, 'the PIN field and a password field inside a web component are covered too', list.at(-1));
     const field = typed.at(-1)?.target;
     const last = shots.at(-1);
     const flat =
@@ -472,7 +490,7 @@ try {
         },
         { src: last.screenshot, t: field, vw: last.shot.viewportW },
       ));
-    check(!!flat && flat.runs <= flat.maxRuns, 'the stored screenshot has the revealed password pixelated out (no readable characters)', JSON.stringify(flat));
+    check(!!flat && flat.runs <= 3, 'the stored screenshot has the revealed password covered (no readable characters)', JSON.stringify(flat));
   }
 
   // ---------- copy menu ----------
