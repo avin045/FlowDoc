@@ -52,6 +52,7 @@ function migrateFromStepCraft() {
 }
 
 // The workspace is served from app://flowdoc/ so ES modules load normally.
+const APP_ORIGIN = 'app://flowdoc/';
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
@@ -72,6 +73,7 @@ const store = createFileStore(DEFAULT_LIBRARY, {
     if (source !== 'ui' && mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('kv:changed', { key });
   },
 });
+process.on('exit', () => store.flushSync());
 setKv(store);
 const settings = createSettings(join(app.getPath('userData'), 'settings.json'));
 const capture = createCapture({ dir: here, log });
@@ -355,14 +357,35 @@ function updateTray(state = recorder.state) {
 
 // ---------- IPC ----------
 
-function registerIpc() {
-  ipcMain.handle('kv:get', (_e, key) => store.get(key));
-  ipcMain.handle('kv:set', (_e, key, value) => store.set(key, value, { source: 'ui' }));
-  ipcMain.handle('kv:remove', (_e, key) => store.remove(key, { source: 'ui' }));
+// Only FlowDoc's own pages may use the bridge: the workspace (and the recorder
+// bar, for its own few calls). A print preview or any page a window was
+// somehow navigated to gets nothing.
+const fromWorkspace = (e) => !!mainWin && !mainWin.isDestroyed() && e.sender === mainWin.webContents && e.senderFrame === e.sender.mainFrame && String(e.senderFrame?.url).startsWith(APP_ORIGIN);
+const fromBar = (e) => !!widgetWin && !widgetWin.isDestroyed() && e.sender === widgetWin.webContents;
+function guard(check, fn) {
+  return (e, ...args) => {
+    if (!check(e)) throw new Error('Not allowed.');
+    return fn(e, ...args);
+  };
+}
+const workspaceOnly = (fn) => guard(fromWorkspace, fn);
+const workspaceOrBar = (fn) => guard((e) => fromWorkspace(e) || fromBar(e), fn);
 
-  ipcMain.handle('recorder:start', (_e, opts) => startRecording(opts));
-  ipcMain.handle('recorder:stop', () => recorder.stop());
-  ipcMain.handle('recorder:discard', async () => {
+function registerIpc() {
+  const handle = (channel, fn) => ipcMain.handle(channel, workspaceOnly(fn));
+  const handleShared = (channel, fn) => ipcMain.handle(channel, workspaceOrBar(fn));
+  const on = (channel, check, fn) =>
+    ipcMain.on(channel, (e, ...args) => {
+      if (check(e)) fn(e, ...args);
+    });
+
+  handle('kv:get', (_e, key) => store.get(key));
+  handle('kv:set', (_e, key, value) => store.set(key, value, { source: 'ui' }));
+  handle('kv:remove', (_e, key) => store.remove(key, { source: 'ui' }));
+
+  handle('recorder:start', (_e, opts) => startRecording(opts));
+  handleShared('recorder:stop', () => recorder.stop());
+  handleShared('recorder:discard', async () => {
     const s = await recorder.discard();
     widgetWin?.hide();
     if (mainWin) {
@@ -371,16 +394,16 @@ function registerIpc() {
     }
     return s;
   });
-  ipcMain.handle('recorder:pause', () => recorder.setPaused(true));
-  ipcMain.handle('recorder:resume', () => recorder.setPaused(false));
-  ipcMain.handle('recorder:state', () => recorder.state);
-  ipcMain.handle('recorder:apps', (_e, keep) => listApps(Array.isArray(keep) ? keep : []));
-  ipcMain.handle('recorder:setApps', (_e, apps) => recorder.setApps(apps));
-  ipcMain.handle('recorder:includeApp', (_e, a) => recorder.includeApp(a));
-  ipcMain.handle('recorder:dismissStray', (_e, key) => recorder.dismissStray(key));
-  ipcMain.handle('recorder:reselectArea', () => reselectArea());
+  handleShared('recorder:pause', () => recorder.setPaused(true));
+  handleShared('recorder:resume', () => recorder.setPaused(false));
+  handleShared('recorder:state', () => recorder.state);
+  handleShared('recorder:apps', (_e, keep) => listApps(Array.isArray(keep) ? keep : []));
+  handleShared('recorder:setApps', (_e, apps) => recorder.setApps(apps));
+  handleShared('recorder:includeApp', (_e, a) => recorder.includeApp(a));
+  handleShared('recorder:dismissStray', (_e, key) => recorder.dismissStray(key));
+  handleShared('recorder:reselectArea', () => reselectArea());
   // The recorder bar grows for its app list and prompts; keep its bottom centre in place.
-  ipcMain.on('recorder:fit', (_e, size) => {
+  on('recorder:fit', fromBar, (_e, size) => {
     if (!widgetWin || widgetWin.isDestroyed()) return;
     const b = widgetWin.getBounds();
     const width = Math.max(240, Math.min(900, Math.ceil(size?.width || 0)));
@@ -389,36 +412,36 @@ function registerIpc() {
     widgetWin.setBounds({ x: Math.round(b.x + (b.width - width) / 2), y: b.y + b.height - height, width, height });
   });
 
-  ipcMain.handle('settings:get', () => settings.getPublic());
-  ipcMain.handle('settings:update', async (_e, patch) => {
+  handle('settings:get', () => settings.getPublic());
+  handle('settings:update', async (_e, patch) => {
     const next = await settings.update(patch);
     if (patch?.capture && 'hideBar' in patch.capture) applyBarProtection((await settings.get()).capture.hideBar);
     return next;
   });
-  ipcMain.handle('settings:setKey', (_e, provider, key) => settings.setKey(provider, key));
+  handle('settings:setKey', (_e, provider, key) => settings.setKey(provider, key));
 
-  ipcMain.handle('ai:complete', async (_e, req) => {
+  handle('ai:complete', async (_e, req) => {
     const s = await settings.get();
     const provider = req.provider || s.ai.provider;
     if (!provider || provider === 'off') throw new Error('AI is turned off. Choose a provider in Settings.');
     const apiKey = await settings.getKey(provider);
     return complete({ ...req, provider, apiKey, model: req.model || s.ai.models[provider] });
   });
-  ipcMain.handle('ai:listModels', async (_e, provider) => listModels(provider, await settings.getKey(provider)));
+  handle('ai:listModels', async (_e, provider) => listModels(provider, await settings.getKey(provider)));
 
-  ipcMain.handle('notion:me', async () => whoAmI(await settings.getKey('notion')));
-  ipcMain.handle('notion:pages', async (_e, query) => listPages(await settings.getKey('notion'), query || ''));
-  ipcMain.handle('notion:children', async (_e, pageId) => listChildPages(await settings.getKey('notion'), pageId));
-  ipcMain.handle('notion:path', async (_e, pageId) => pathTo(await settings.getKey('notion'), pageId));
-  ipcMain.handle('notion:setSaved', async (_e, list) => settings.update({ notion: { saved: normalizeSaved(list) } }));
-  ipcMain.handle('notion:save', async (e, req) => {
+  handle('notion:me', async () => whoAmI(await settings.getKey('notion')));
+  handle('notion:pages', async (_e, query) => listPages(await settings.getKey('notion'), query || ''));
+  handle('notion:children', async (_e, pageId) => listChildPages(await settings.getKey('notion'), pageId));
+  handle('notion:path', async (_e, pageId) => pathTo(await settings.getKey('notion'), pageId));
+  handle('notion:setSaved', async (_e, list) => settings.update({ notion: { saved: normalizeSaved(list) } }));
+  handle('notion:save', async (e, req) => {
     const token = await settings.getKey('notion');
     const result = await saveToNotion(token, req, (p) => !e.sender.isDestroyed() && e.sender.send('notion:progress', p));
     // Remember the destination under Recent.
     if (req.location?.id) await settings.update({ notion: { recents: withRecent((await settings.get()).notion.recents, req.location) } });
     return result;
   });
-  ipcMain.on('theme:set', (_e, mode) => {
+  on('theme:set', fromWorkspace, (_e, mode) => {
     const source = mode === 'light' || mode === 'dark' ? mode : 'system';
     if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source;
     mainWin?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0b1120' : '#f6f7fb');
@@ -435,15 +458,16 @@ function registerIpc() {
   const switchLibrary = async (target, { copy = true } = {}) => {
     if (recorder.state.active) throw new Error('Finish the capture first, then change the guides folder.');
     if (!(await ensureWritable(target))) throw new Error("FlowDoc can't write to that folder. Choose one you have permission to change.");
+    await store.flush(); // the guide list on disk is what gets copied
     const copied = copy ? await mergeLibrary(store.dir, target) : 0;
     await store.setDir(target);
     await settings.update({ storage: { libraryDir: target === DEFAULT_LIBRARY ? '' : target } });
     storageFallback = null;
     return { ...(await storageInfo()), copied };
   };
-  ipcMain.handle('storage:get', storageInfo);
-  ipcMain.handle('storage:inspect', (_e, folder) => inspectFolder(String(folder || '')));
-  ipcMain.handle('storage:choose', async () => {
+  handle('storage:get', storageInfo);
+  handle('storage:inspect', (_e, folder) => inspectFolder(String(folder || '')));
+  handle('storage:choose', async () => {
     const res = await dialog.showOpenDialog(mainWin, {
       title: 'Choose a folder for your FlowDoc guides',
       defaultPath: store.dir,
@@ -452,25 +476,80 @@ function registerIpc() {
     });
     return res.canceled || !res.filePaths[0] ? null : inspectFolder(res.filePaths[0]);
   });
-  ipcMain.handle('storage:apply', (_e, { target, copy }) => switchLibrary(target, { copy }));
-  ipcMain.handle('storage:reset', (_e, { copy } = {}) => switchLibrary(DEFAULT_LIBRARY, { copy }));
-  ipcMain.handle('storage:open', () => shell.openPath(store.dir));
+  handle('storage:apply', (_e, { target, copy }) => switchLibrary(target, { copy }));
+  handle('storage:reset', (_e, { copy } = {}) => switchLibrary(DEFAULT_LIBRARY, { copy }));
+  handle('storage:open', () => shell.openPath(store.dir));
 
-  ipcMain.handle('shell:openExternal', (_e, url) => {
+  handle('shell:openExternal', (_e, url) => {
     if (/^https:\/\//.test(url)) return shell.openExternal(url);
   });
 }
 
+// ---------- web content lockdown ----------
+
+// FlowDoc's windows only ever show FlowDoc's own pages. A link, a dropped
+// file or injected markup can't take a window (and the bridge its preload
+// script exposes) somewhere else: web links open in the browser instead.
+const ownPage = (url) => url.startsWith(APP_ORIGIN) || url.startsWith('file:') || url.startsWith('blob:app://') || url === 'about:blank';
+app.on('web-contents-created', (_e, wc) => {
+  const keepHome = (e, url) => {
+    if (url.startsWith(APP_ORIGIN) && wc.getURL().startsWith(APP_ORIGIN)) return; // within the workspace (or the self-test's demo)
+    e.preventDefault();
+    if (/^https?:/.test(url)) shell.openExternal(url);
+  };
+  wc.on('will-navigate', keepHome);
+  wc.on('will-redirect', (e, url) => !ownPage(url) && e.preventDefault());
+  wc.on('will-attach-webview', (e) => e.preventDefault());
+  // Windows other than the workspace open nothing (the workspace sets its own handler).
+  wc.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+});
+
+// Electron grants every permission by default. FlowDoc's pages need only a
+// few: the hidden capture window streams the screen; the workspace writes to
+// the clipboard and shows a notification when AI work finishes.
+const WORKSPACE_PERMISSIONS = new Set(['clipboard-sanitized-write', 'notifications', 'fullscreen']);
+const captureWindowUrl = (url) => url.startsWith('file:') && /[/\\]capture\.html$/.test(new URL(url).pathname);
+function permitted(permission, url = '') {
+  if (permission === 'media') return captureWindowUrl(url);
+  return url.startsWith(APP_ORIGIN) && WORKSPACE_PERMISSIONS.has(permission);
+}
+function lockPermissions() {
+  const s = session.defaultSession;
+  s.setPermissionRequestHandler((wc, permission, done, details) => done(permitted(permission, details?.requestingUrl || wc?.getURL() || '')));
+  s.setPermissionCheckHandler((wc, permission, origin, details) => permitted(permission, details?.requestingUrl || wc?.getURL() || origin || ''));
+}
+
+// The workspace page also gets its security policy as a header, stricter
+// than the one in app.html: on the desktop the page itself never talks to
+// the internet (AI and Notion requests go through the main process).
+const WORKSPACE_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+
 // ---------- app lifecycle ----------
 
 app.whenReady().then(async () => {
-  protocol.handle('app', (req) => {
+  lockPermissions();
+  protocol.handle('app', async (req) => {
     const { pathname } = new URL(req.url);
     const rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
+    // Screenshots and thumbnails, stored next to the guides (store.js).
+    if (/^assets[/\\]/.test(rel)) {
+      const file = store.assetPath(rel.slice('assets/'.length));
+      if (!file) return new Response('Not found', { status: 404 });
+      return net.fetch(pathToFileURL(file).toString());
+    }
     const base = rel.startsWith('demo') ? root : join(root, 'extension');
     const file = join(base, rel);
     if (!file.startsWith(root)) return new Response('Forbidden', { status: 403 });
-    return net.fetch(pathToFileURL(file).toString());
+    const res = await net.fetch(pathToFileURL(file).toString());
+    if (!/\.html$/i.test(rel) || rel.startsWith('demo')) return res;
+    const headers = new Headers(res.headers);
+    headers.set('content-security-policy', WORKSPACE_CSP);
+    headers.set('content-type', 'text/html; charset=utf-8');
+    return new Response(res.body, { status: res.status, headers });
   });
 
   registerIpc();
@@ -500,6 +579,15 @@ app.whenReady().then(async () => {
   globalShortcut.register(SHORTCUT, () => (recorder.state.active ? recorder.stop() : startRecording()));
   inspector.start(); // warm up the accessibility helper in the background
 
+  // Once things have settled: convert guides from before screenshots were
+  // kept as files, and remove images that no guide uses any more.
+  setTimeout(() => {
+    store
+      .tidy()
+      .then(({ converted, removed }) => (converted || removed) && log(`library: ${converted} guides converted, ${removed} unused images removed`))
+      .catch((err) => log(`library upkeep failed: ${err.message}`));
+  }, process.env.FLOWDOC_SELFTEST ? 0 : 20_000);
+
   if (process.env.FLOWDOC_SELFTEST) {
     const { runSelfTest } = await import('./selftest.js');
     runSelfTest({ app, mainWin, recorder, startRecording, settings, listApps, areaPicker, areaFrame, applyBarProtection, markCapturable: (w) => capturableWindows.add(w), getWidget: () => widgetWin }).catch((err) => {
@@ -526,6 +614,7 @@ app.on('before-quit', async (e) => {
 });
 
 app.on('will-quit', () => {
+  store.flushSync();
   globalShortcut.unregisterAll();
   inspector.stop();
 });

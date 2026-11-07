@@ -9,10 +9,22 @@ export function createCapture({ dir, log = () => {} }) {
   let win = null;
   let streaming = false;
   let nextId = 1;
+  let only = null; // display ids to stream (an area capture needs one), or null for all
+
+  // Replies from the capture window carry an id; only that window may send them.
+  const fromCaptureWindow = (e) => !!win && !win.isDestroyed() && e.sender === win.webContents;
+  function reply(channel, fn) {
+    const listener = (e, payload) => {
+      if (!fromCaptureWindow(e)) return;
+      ipcMain.removeListener(channel, listener);
+      fn(payload);
+    };
+    ipcMain.on(channel, listener);
+  }
 
   async function sources() {
     const list = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
-    const displays = screen.getAllDisplays();
+    const displays = screen.getAllDisplays().filter((d) => !only || only.includes(d.id));
     // Map each display to its capture source (display_id is empty on some Linux setups).
     return displays.map((d, i) => {
       const src = list.find((s) => s.display_id && String(s.display_id) === String(d.id)) || list[i] || list[0];
@@ -25,7 +37,11 @@ export function createCapture({ dir, log = () => {} }) {
     });
   }
 
-  async function start() {
+  // `displayIds` limits the live streams to those displays (each stream costs
+  // CPU for as long as the capture runs); shots of other displays then come
+  // from a one-off grab.
+  async function start(displayIds = null) {
+    only = displayIds?.length ? [...displayIds] : null;
     if (win) return streaming;
     win = new BrowserWindow({
       show: false,
@@ -82,9 +98,9 @@ export function createCapture({ dir, log = () => {} }) {
           resolve(frame);
         };
         const timer = setTimeout(() => done(null), 2000);
-        ipcMain.once(`capture:frame:${id}`, (_e, frame) => done(frame));
+        reply(`capture:frame:${id}`, (frame) => done(frame));
         // The renderer has kept the frame; hide the bar, then let it fill the spot.
-        ipcMain.once(`capture:held:${id}`, () => {
+        reply(`capture:held:${id}`, () => {
           if (!hidden) cover.hide();
           hidden = true;
           win?.webContents.send('capture:patch', { id });
@@ -110,11 +126,45 @@ export function createCapture({ dir, log = () => {} }) {
     }
   }
 
+  // Streams only these displays from now on (an area moved to another display).
+  async function setDisplays(displayIds) {
+    only = displayIds?.length ? [...displayIds] : null;
+    if (!win || win.isDestroyed()) return streaming;
+    try {
+      const result = await win.webContents.executeJavaScript(`window.captureStart(${JSON.stringify(await sources())}, { replace: true })`);
+      streaming = result.ok;
+    } catch (err) {
+      log(`stream capture failed: ${err.message}`);
+      streaming = false;
+    }
+    return streaming;
+  }
+
+  // Whether two shots differ (see recorder.js shotsDiffer for the rules). The
+  // capture window does the work, so decoding two full-screen images doesn't
+  // hold up the main process; null when it can't (then the caller does it).
+  function diff(a, b, region, masks) {
+    if (!win || win.isDestroyed()) return Promise.resolve(null);
+    const id = nextId++;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        ipcMain.removeAllListeners(`capture:diff:${id}`);
+        resolve(null);
+      }, 3000);
+      reply(`capture:diff:${id}`, (result) => {
+        clearTimeout(timer);
+        resolve(typeof result === 'boolean' ? result : null);
+      });
+      win.webContents.send('capture:diff', { id, a, b, region, masks });
+    });
+  }
+
   function stop() {
     if (win && !win.isDestroyed()) win.destroy();
     win = null;
     streaming = false;
+    only = null;
   }
 
-  return { start, grab, stop, get streaming() { return streaming; } };
+  return { start, setDisplays, grab, diff, stop, get streaming() { return streaming; } };
 }

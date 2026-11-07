@@ -77,6 +77,29 @@ async function ensureContentScript(tabId) {
   }
 }
 
+// The recorder script runs only while a capture is on: registered for pages
+// that load meanwhile, and put into a tab when it's switched to. Outside a
+// capture no page runs any FlowDoc code.
+const RECORDER_SCRIPT = 'flowdoc-recorder';
+async function registerRecorder() {
+  try {
+    const found = await chrome.scripting.getRegisteredContentScripts({ ids: [RECORDER_SCRIPT] });
+    if (found.length) return;
+    await chrome.scripting.registerContentScripts([
+      { id: RECORDER_SCRIPT, matches: ['<all_urls>'], js: ['content.js'], runAt: 'document_idle', allFrames: false, persistAcrossSessions: false },
+    ]);
+  } catch (err) {
+    console.warn('[FlowDoc] could not register the recorder script:', err?.message || err);
+  }
+}
+async function unregisterRecorder() {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [RECORDER_SCRIPT] });
+  } catch {
+    // not registered
+  }
+}
+
 // ---------- steps ----------
 
 function buildStep(raw, shot, page) {
@@ -296,6 +319,7 @@ async function start(tabId, { guideId } = {}) {
       { windowId: tab.windowId, page: { url: tab.url, title: tab.title } },
     );
   }
+  await registerRecorder();
   await ensureContentScript(tabId);
   return setState({ ...(await getState()) });
 }
@@ -312,6 +336,7 @@ async function stop({ open = true } = {}) {
     await saveGuide(guide);
   });
   await setState(IDLE);
+  await unregisterRecorder();
   if (open) await chrome.tabs.create({ url: chrome.runtime.getURL(`app.html#/guide/${state.guideId}`) });
   return { ...IDLE, lastGuideId: state.guideId };
 }
@@ -331,7 +356,9 @@ async function discard() {
     delete guide.recording;
     await saveGuide(guide);
   });
-  return setState(IDLE);
+  const idle = await setState(IDLE);
+  await unregisterRecorder();
+  return idle;
 }
 
 async function setPaused(paused) {
@@ -427,7 +454,10 @@ async function tabSwitched(tabId) {
   if (!/^(https?|file):/.test(tab?.pendingUrl || tab?.url || '')) return;
   if (tab.status === 'loading') tab = await loadedTab(tabId);
   const state = await getState();
-  if (!state.active || state.paused || !tab?.active || !/^(https?|file):/.test(tab.url || '')) return;
+  if (!state.active || !tab?.active || !/^(https?|file):/.test(tab.url || '')) return;
+  // A tab that was open before the capture began doesn't have the recorder yet.
+  await ensureContentScript(tab.id);
+  if (state.paused) return;
   const guide = await getGuide(state.guideId);
   if (guide?.steps.findLast((s) => s.url)?.url === tab.url) return;
   await new Promise((r) => setTimeout(r, 300)); // let the tab paint before the screenshot
@@ -448,4 +478,10 @@ chrome.runtime.onStartup.addListener(async () => {
   // A browser restart ends any recording that was in progress.
   const state = await getState();
   if (state.active) await stop({ open: false });
+});
+
+// After an update or reload: the recorder script belongs to a capture in progress only.
+chrome.runtime.onInstalled.addListener(async () => {
+  if ((await getState()).active) await registerRecorder();
+  else await unregisterRecorder();
 });

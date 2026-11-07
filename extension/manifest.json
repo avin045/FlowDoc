@@ -24,14 +24,6 @@
   },
   "permissions": ["storage", "unlimitedStorage", "tabs", "activeTab", "scripting", "webNavigation"],
   "host_permissions": ["<all_urls>"],
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle",
-      "all_frames": false
-    }
-  ],
   "commands": {
     "toggle-recording": {
       "suggested_key": { "default": "Alt+Shift+R" },

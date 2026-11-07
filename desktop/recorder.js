@@ -397,7 +397,9 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   // Whether the screen looks the same in two shots of `rec`'s window, leaving
   // out the recorder bar and, at each of `points`, what comes and goes with
   // the mouse pointer rather than with a click (NEAR_POINTER).
-  function unchanged(a, b, rec, display, points) {
+  // The comparison runs in the capture window when it can (capture.diff), so
+  // the main process isn't held up decoding two full-screen images.
+  async function unchanged(a, b, rec, display, points) {
     if (!a?.dataUrl || !b?.dataUrl) return false;
     const db = display.bounds;
     const boxes = rec.kind === 'dblclick' ? [...NEAR_POINTER, NEAR_POINTER_LINE] : NEAR_POINTER;
@@ -405,7 +407,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     const wb = widgetBounds?.();
     if (wb && overlaps(wb, db)) masks.push(fractionOf(wb, db));
     try {
-      return !shotsDiffer(a.dataUrl, b.dataUrl, rec.region, masks);
+      const differ = (await capture.diff?.(a.dataUrl, b.dataUrl, rec.region, masks)) ?? shotsDiffer(a.dataUrl, b.dataUrl, rec.region, masks);
+      return !differ;
     } catch (err) {
       log(`repeat check failed: ${err.message}`);
       return false;
@@ -421,8 +424,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     clearTimeout(p.timer);
     const { record: cur, prev, display } = p;
     const sameKind = prev.kind === cur.kind;
-    const idleBefore = sameKind && unchanged(prev.frame, cur.frame, cur, display, [prev, cur]);
-    const idleAfter = sameKind && !idleBefore && after?.dataUrl && unchanged(cur.frame, after, cur, display, [cur, at]);
+    const idleBefore = sameKind && (await unchanged(prev.frame, cur.frame, cur, display, [prev, cur]));
+    const idleAfter = sameKind && !idleBefore && !!after?.dataUrl && (await unchanged(cur.frame, after, cur, display, [cur, at]));
     if (idleBefore || idleAfter) {
       log(`dropped a repeated ${cur.kind} (${idleBefore ? 'no change since the last one' : 'it changed nothing'})`);
       lastClickStep = cur; // still the click the next one is compared with
@@ -681,7 +684,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     }
     guide.captureScope = cleanScope(scope);
     await saveGuide(guide);
-    await Promise.all([capture.start(), inspector.warmUp()]);
+    // An area capture streams only the area's display.
+    await Promise.all([capture.start(scope.mode === 'area' ? [areaDisplay().id] : null), inspector.warmUp()]);
     const stepCount = guide.steps.filter((s) => s.kind === 'action').length;
     stray = null;
     muted.clear();
@@ -798,8 +802,10 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     const next = cleanScope({ mode: 'area', area }).area;
     if (!(next?.width > 0)) return { ...state };
     if (draft) flushDraft();
+    const before = areaDisplay().id;
     scope.area = next;
     lastInArea = false;
+    if (areaDisplay().id !== before) await capture.setDisplays?.([areaDisplay().id]);
     await saveScope();
     return { ...state };
   }

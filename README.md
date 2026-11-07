@@ -381,10 +381,10 @@ Open **Settings → Capture**:
 
 Inside that folder:
 
-- `library/` holds one JSON file per guide, with the screenshots included.
+- `library/` holds one small JSON file per guide, and `library/assets/` the screenshots and thumbnails as image files (WebP for desktop captures). Each image is stored once, named after its contents; images no guide uses any more are removed a while after FlowDoc starts.
 - `settings.json` holds your settings and the encrypted API keys and Notion secret.
 
-To move guides to another computer, use **Export → Backup (.json)** and **Import**. To back up everything, copy the `library` folder.
+To move guides to another computer, use **Export → Backup (.json)** and **Import** (the backup carries the screenshots inside it). To back up everything, copy the whole `library` folder, `assets` included.
 
 #### Use your own guides folder
 

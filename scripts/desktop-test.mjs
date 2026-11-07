@@ -440,6 +440,19 @@ check(JSON.stringify(side.keys) === '["capture","storage","capture","integration
 check(JSON.stringify(sb.storage) === '["storage"]', 'clicking a section shows only that section', JSON.stringify(sb.storage));
 check(sb.reopened === 'storage' && JSON.stringify(sb.reopenedVisible) === '["storage"]' && sb.focused === 'storage', 'Settings reopens on the section used last, with keyboard focus on it', `${sb.reopened} ${JSON.stringify(sb.reopenedVisible)} focus=${sb.focused}`);
 
+console.log('\nStorage and security');
+const sec = r.security || {};
+const sto = sec.storage || {};
+check(!sto.inlineImages && sto.refs > 0 && sto.filesExist, 'screenshots are saved as image files, not inside the guide file', JSON.stringify(sto));
+check(sto.webp > 0, 'captured screenshots are WebP', `${sto.webp}/${sto.refs}`);
+check(!sto.indexInlineImages, 'the guide list keeps thumbnails as files too');
+check(sec.editorImage?.blob && sec.editorImage.width > 0, 'the editor shows screenshots from the stored files', JSON.stringify(sec.editorImage));
+check(sec.inlineScriptBlocked === true, 'markup injected into the workspace cannot run script (CSP)');
+check(sec.import && sec.import.id === null && sec.import.kind === 'manual' && sec.import.href === null && sec.import.screenshot === null, 'an imported guide file is cleaned of markup, script links and remote images', JSON.stringify(sec.import));
+check(sec.navigationBlocked === true, 'the workspace window cannot be navigated away from FlowDoc');
+check(sec.geolocation === 'denied', 'permissions FlowDoc does not use are refused', sec.geolocation);
+check(sec.notifications === 'granted', 'notifications stay allowed for finished AI work', sec.notifications);
+
 console.log('\nRename + exports');
 check(r.legacyGuide === 'A guide made in StepCraft', 'guides from StepCraft carried over to FlowDoc');
 for (const f of ['pdf', 'docx', 'html', 'markdown', 'json']) {
