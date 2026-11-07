@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('flowdocCapture', {
   sendFrame: (id, frame) => ipcRenderer.send(`capture:frame:${id}`, frame),
   onDiff: (cb) => ipcRenderer.on('capture:diff', (_e, req) => cb(req)),
   sendDiff: (id, differ) => ipcRenderer.send(`capture:diff:${id}`, differ),
+  onRedact: (cb) => ipcRenderer.on('capture:redact', (_e, req) => cb(req)),
+  sendRedacted: (id, dataUrl) => ipcRenderer.send(`capture:redacted:${id}`, dataUrl),
 });

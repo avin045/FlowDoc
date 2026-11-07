@@ -167,6 +167,20 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   await click('#password');
   await type('hunter22');
   await sleep(2600);
+  // "Show password" turns the field into plain text: it stays a password
+  // field, in the step text and in every screenshot.
+  await demo.webContents.executeJavaScript(`(() => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'reveal';
+    b.textContent = 'Show password';
+    b.addEventListener('click', () => (document.getElementById('password').type = 'text'));
+    document.getElementById('password').after(b);
+  })()`);
+  await click('#reveal');
+  await click('#password');
+  await type('x9');
+  await sleep(2600);
   await click('#remember');
   const navigated = new Promise((r) => demo.webContents.once('did-finish-load', r));
   await click('button[type=submit]');
@@ -236,6 +250,35 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     })),
   };
   results.rawContainsPassword = JSON.stringify(guide).includes('hunter22');
+  // Password fields in screenshots: every shot of the sign-in page from the
+  // first password on hides the field, and the stored pixels where it is are
+  // flat blocks, not dots or characters.
+  {
+    const steps = guide.steps;
+    const first = steps.findIndex((st) => st.secret);
+    const signIn = first < 0 ? [] : steps.filter((st, i) => i >= first && st.window === steps[first].window && st.screenshot);
+    const pw = steps.filter((st) => st.secret).at(-1);
+    let flat = null;
+    if (pw?.screenshot && pw.target && pw.shot?.viewportW) {
+      const img = await decodeShot(pw.screenshot);
+      const k = img.getSize().width / pw.shot.viewportW;
+      const box = { x: Math.round(pw.target.x * k) + 6, y: Math.round(pw.target.y * k), width: Math.round(pw.target.w * k) - 12, height: Math.round(pw.target.h * k) };
+      const px = img.crop(box).toBitmap();
+      const row = Math.floor(box.height / 2);
+      let runs = 1;
+      for (let x = 1; x < box.width; x++) {
+        const i = (row * box.width + x) * 4;
+        if (Math.abs(px[i] - px[i - 4]) + Math.abs(px[i + 1] - px[i - 3]) + Math.abs(px[i + 2] - px[i - 2]) > 30) runs++;
+      }
+      writeFileSync(join(out, 'password-field.png'), img.crop(box).toPNG());
+      flat = { runs, maxRuns: Math.ceil(box.width / Math.max(16, box.height)) + 3 };
+    }
+    results.passwordShots = {
+      secretSteps: steps.filter((st) => st.secret).map((st) => st.text),
+      signIn: signIn.map((st) => ({ text: st.text, secretsHidden: st.secretsHidden || 0 })),
+      flat,
+    };
+  }
 
   // ---------- continue capturing ----------
   // The editor's "Continue capturing" adds new steps after the last one and

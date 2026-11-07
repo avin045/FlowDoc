@@ -181,3 +181,39 @@ window.flowdocCapture.onDiff(({ id, a, b, region, masks }) => {
     () => window.flowdocCapture.sendDiff(id, null),
   );
 });
+
+// ---------- password fields ----------
+
+// Pixelates password fields into a screenshot, with blocks as tall as the
+// field: no character, dot or length survives (recorder.js hideSecrets).
+async function pixelateBoxes(dataUrl, boxes) {
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const c = document.createElement('canvas');
+  c.width = bitmap.width;
+  c.height = bitmap.height;
+  const g = c.getContext('2d');
+  g.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  for (const f of boxes) {
+    const x = Math.max(0, Math.floor(f.x * c.width));
+    const y = Math.max(0, Math.floor(f.y * c.height));
+    const w = Math.min(c.width - x, Math.ceil(f.w * c.width));
+    const h = Math.min(c.height - y, Math.ceil(f.h * c.height));
+    if (w <= 0 || h <= 0) continue;
+    const block = Math.max(16, h);
+    const tiny = document.createElement('canvas');
+    tiny.width = Math.max(1, Math.ceil(w / block));
+    tiny.height = Math.max(1, Math.ceil(h / block));
+    tiny.getContext('2d').drawImage(c, x, y, w, h, 0, 0, tiny.width, tiny.height);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(tiny, 0, 0, tiny.width, tiny.height, x, y, w, h);
+  }
+  return encode(c);
+}
+
+window.flowdocCapture.onRedact(({ id, dataUrl, boxes }) => {
+  pixelateBoxes(dataUrl, boxes).then(
+    (out) => window.flowdocCapture.sendRedacted(id, out),
+    () => window.flowdocCapture.sendRedacted(id, null),
+  );
+});

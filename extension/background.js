@@ -100,19 +100,60 @@ async function unregisterRecorder() {
   }
 }
 
+// ---------- password fields ----------
+
+// Pixelates the password fields (boxes in viewport CSS pixels, from the page)
+// into the screenshot itself, with blocks as tall as the field: no character,
+// dot or length survives. The original pixels are never stored. If that fails,
+// the boxes become ordinary redactions, which every view and export applies.
+async function hideSecrets(shot, rects, viewport) {
+  if (!shot?.dataUrl || !rects?.length) return shot;
+  const k = shot.width / (viewport?.w || shot.width);
+  const boxes = rects
+    .map((r) => {
+      const x = Math.max(0, Math.floor(r.x * k));
+      const y = Math.max(0, Math.floor(r.y * k));
+      return { x, y, w: Math.min(shot.width - x, Math.ceil(r.w * k)), h: Math.min(shot.height - y, Math.ceil(r.h * k)) };
+    })
+    .filter((b) => b.w > 0 && b.h > 0);
+  if (!boxes.length) return shot;
+  try {
+    const img = await createImageBitmap(await (await fetch(shot.dataUrl)).blob());
+    const c = new OffscreenCanvas(img.width, img.height);
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    img.close();
+    for (const b of boxes) {
+      const block = Math.max(16, b.h);
+      const tiny = new OffscreenCanvas(Math.max(1, Math.ceil(b.w / block)), Math.max(1, Math.ceil(b.h / block)));
+      tiny.getContext('2d').drawImage(c, b.x, b.y, b.w, b.h, 0, 0, tiny.width, tiny.height);
+      g.imageSmoothingEnabled = false;
+      g.drawImage(tiny, 0, 0, tiny.width, tiny.height, b.x, b.y, b.w, b.h);
+    }
+    const bytes = new Uint8Array(await (await c.convertToBlob({ type: 'image/jpeg', quality: 0.88 })).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { ...shot, dataUrl: `data:image/jpeg;base64,${btoa(bin)}`, secretsHidden: boxes.length };
+  } catch (err) {
+    console.warn('[FlowDoc] could not hide password fields in the screenshot:', err?.message || err);
+    return { ...shot, redact: boxes.map((b) => ({ x: b.x / shot.width, y: b.y / shot.height, w: b.w / shot.width, h: b.h / shot.height })) };
+  }
+}
+
 // ---------- steps ----------
 
 function buildStep(raw, shot, page) {
   return {
     kind: 'action',
     highlight: true,
-    redactions: [],
+    redactions: [...(shot?.redact || [])],
     crop: null,
     createdAt: Date.now(),
     ...raw,
     url: page?.url || raw.url || '',
     pageTitle: page?.title || raw.pageTitle || '',
     screenshot: shot?.dataUrl || null,
+    ...(shot?.secretsHidden || shot?.redact ? { secretsHidden: shot.secretsHidden || shot.redact.length } : {}),
     shot: shot
       ? {
           width: shot.width,
@@ -235,7 +276,7 @@ async function addSteps(rawSteps, opts) {
 async function addStepsInTurn(rawSteps, { windowId, page, capture: wantCapture = true, settle = null }, prior) {
   const state = await getState();
   if (!state.active || state.paused) return state;
-  const shot = wantCapture ? await capture(windowId) : null;
+  const shot = wantCapture ? await hideSecrets(await capture(windowId), page?.secrets, page?.viewport) : null;
   const holding = rawSteps.some((r) => r.hold) && (await ignoringRepeats());
   await prior;
   return enqueue(async () => {

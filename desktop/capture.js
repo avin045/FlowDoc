@@ -159,6 +159,24 @@ export function createCapture({ dir, log = () => {} }) {
     });
   }
 
+  // Pixelates `boxes` (fractions of the image) into a screenshot: password
+  // fields. Returns the new image, or null when the capture window can't.
+  function redact(dataUrl, boxes) {
+    if (!win || win.isDestroyed() || !dataUrl || !boxes?.length) return Promise.resolve(null);
+    const id = nextId++;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        ipcMain.removeAllListeners(`capture:redacted:${id}`);
+        resolve(null);
+      }, 4000);
+      reply(`capture:redacted:${id}`, (result) => {
+        clearTimeout(timer);
+        resolve(typeof result === 'string' && result.startsWith('data:image/') ? result : null);
+      });
+      win.webContents.send('capture:redact', { id, dataUrl, boxes });
+    });
+  }
+
   function stop() {
     if (win && !win.isDestroyed()) win.destroy();
     win = null;
@@ -166,5 +184,5 @@ export function createCapture({ dir, log = () => {} }) {
     only = null;
   }
 
-  return { start, setDisplays, grab, diff, stop, get streaming() { return streaming; } };
+  return { start, setDisplays, grab, diff, redact, stop, get streaming() { return streaming; } };
 }

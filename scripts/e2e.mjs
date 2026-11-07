@@ -409,6 +409,72 @@ try {
     check(!!added[0]?.screenshot && shots === 1, 'the second press of a double-click takes no screenshot of its own', summary);
   }
 
+  // Password fields are never readable in a screenshot, not even as dots, and
+  // not after "Show password" turns the field into plain text.
+  {
+    console.log('\nPassword fields');
+    await page.goto(`http://localhost:${PORT}/demo/`);
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.id = 'reveal';
+      b.textContent = 'Show password';
+      b.addEventListener('click', () => (document.getElementById('password').type = 'text'));
+      document.getElementById('password').after(b);
+    });
+    const id = (await send({ type: 'start', tabId })).guideId;
+    await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+    await page.waitForTimeout(600);
+    await page.click('#password');
+    await page.keyboard.type('s3cretpw', { delay: 20 });
+    await page.waitForTimeout(1600);
+    await page.click('#reveal');
+    await page.waitForTimeout(900);
+    await page.click('#password');
+    await page.keyboard.type('77', { delay: 20 });
+    await page.waitForTimeout(1600);
+    await page.click('#email');
+    await page.waitForTimeout(1200);
+    const g = await control.evaluate(async (gid) => (await import('/shared/guides.js')).getGuide(gid), id);
+    const done = context.waitForEvent('page');
+    await send({ type: 'stop' });
+    await (await done).close();
+    await control.evaluate(async (gid) => (await import('/shared/guides.js')).deleteGuide(gid), id);
+    const list = g.steps.map((st) => `${st.action}: ${st.text}${st.screenshot ? ` [hidden ${st.secretsHidden || 0}]` : ''}`);
+    const typed = g.steps.filter((st) => st.action === 'type');
+    check(!JSON.stringify(g).includes('s3cretpw') && typed.length >= 1 && typed.every((st) => st.secret && st.text === 'Type your password in the **Password** field'), 'typing after "Show password" is still a masked password step', list.join(' / '));
+    const shots = g.steps.filter((st) => st.action !== 'navigate' && st.screenshot);
+    check(shots.length >= 4 && shots.every((st) => st.secretsHidden >= 1), 'every screenshot hides the password field', list.join(' / '));
+    const field = typed.at(-1)?.target;
+    const last = shots.at(-1);
+    const flat =
+      field &&
+      last &&
+      (await app.evaluate(
+        async ({ src, t, vw }) => {
+          const img = new Image();
+          img.src = src;
+          await img.decode();
+          const k = img.naturalWidth / vw;
+          const box = { x: Math.round(t.x * k) + 6, y: Math.round(t.y * k), w: Math.round(t.w * k) - 12, h: Math.round(t.h * k) };
+          const c = document.createElement('canvas');
+          c.width = box.w;
+          c.height = box.h;
+          const g2 = c.getContext('2d');
+          g2.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+          const d = g2.getImageData(0, Math.floor(box.h / 2), box.w, 1).data;
+          let runs = 1;
+          for (let x = 1; x < box.w; x++) {
+            const i = x * 4;
+            if (Math.abs(d[i] - d[i - 4]) + Math.abs(d[i + 1] - d[i - 3]) + Math.abs(d[i + 2] - d[i - 2]) > 30) runs++;
+          }
+          return { runs, maxRuns: Math.ceil(box.w / Math.max(16, box.h)) + 3 };
+        },
+        { src: last.screenshot, t: field, vw: last.shot.viewportW },
+      ));
+    check(!!flat && flat.runs <= flat.maxRuns, 'the stored screenshot has the revealed password pixelated out (no readable characters)', JSON.stringify(flat));
+  }
+
   // ---------- copy menu ----------
   console.log('\nCopy as text or Markdown');
   await app.bringToFront();

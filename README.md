@@ -259,7 +259,7 @@ Element names come from the operating system's accessibility features: UI Automa
 
 ### A4. Privacy while recording
 
-- **Passwords:** password fields are detected and their contents are never saved.
+- **Passwords:** password fields are detected and their contents are never saved, in the step text or in a screenshot. Every screenshot has the password fields on screen pixelated out of the stored image itself, so not even the dots (and the password's length) show. A field stays a password field after you click **Show password**, and fields labelled as passwords (in English, Tamil, Hindi and many other languages) count too. Screenshots taken before this version keep what they show; use **Edit screenshot** to blur a password in them.
 - **The recorder bar** never appears in FlowDoc's screenshots. On Windows it is hidden from all screen captures by default. If you make it visible to other apps ([A7](#a7-capture-settings)), FlowDoc still leaves it out of its own screenshots: at each step it hides the bar from captures for a moment (about a fifth of a second) and fills in what is behind it, so people watching may see the bar blink once per step. On Linux, where windows can't be hidden from captures, FlowDoc blurs the bar out of each step's screenshot instead (you can remove the blur in the screenshot editor).
 - **Clicks inside FlowDoc's own windows** are ignored.
 - **Screenshots:** if one shows something private, blur it afterwards with the screenshot editor ([C4](#c4-blur-private-information-crop-or-change-the-highlight)).
@@ -717,7 +717,7 @@ npm run test:desktop
 - **`npm test`** loads the extension in Chromium and records a sign-in and ticket flow on the demo site. It then edits the guide (title, tip, redaction, reorder, undo/redo), exports all five formats and validates every file. It also saves the guide to a mock Notion, and checks that keys and secrets are stored encrypted (and that older plain keys get encrypted).
   - Chrome 137 and later ignore `--load-extension`. To use an installed Edge instead, run `$env:BROWSER='msedge'; npm test` (PowerShell) or `BROWSER=msedge npm test` (bash).
 - **`npm run test:desktop`** launches the desktop app and opens the demo site in a window. It feeds the recorder hook events at real element positions, so screen capture and the accessibility inspector run for real without moving your mouse. It also:
-  - checks step text, password masking, double-click (one step, one screenshot), right-click and shortcuts;
+  - checks step text, password masking (also after **Show password**, and pixelated out of every screenshot), double-click (one step, one screenshot), right-click and shortcuts;
   - checks that screenshots are stored as image files, and the workspace's lockdown: its security policy, import cleaning, blocked navigation and refused permissions;
   - runs **Improve with AI** in all three styles against mock Gemini and Groq servers, including a background run that finishes after you've left the guide, and checks keys, models, JSON mode, model fallback and the no-invented-values guard;
   - checks the model dropdown, the theme switch, the custom guides folder, and data carried over from an older data folder;
