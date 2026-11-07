@@ -787,7 +787,7 @@ scripts/               vendor copy, icon render, static server, tests
   - Not yet tested by hand in Google Chrome; only an automated test in Microsoft Edge has run.
   - Clicks inside iframes and on browser-internal pages (`chrome://`, the Web Store) aren't recorded.
   - The built-in PDF export shows non-Latin scripts (Tamil, Hindi, Arabic…) as images of the text, so that text can't be selected or searched. **Print → Save as PDF** keeps it selectable.
-  - Your AI key is stored in the browser profile without encryption (the desktop app encrypts it).
+  - Your AI key and Notion secret are kept in the browser profile, encrypted with a browser-held key; the desktop app uses the system keychain instead.
 - **Both:** there is no cloud sharing or share links. Share the exported files instead.
 
 ---
