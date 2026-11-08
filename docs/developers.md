@@ -1,6 +1,6 @@
 # FlowDoc for developers
 
-How to run FlowDoc from source, build the installers, run the tests, and find your way around the code. If you only want to use FlowDoc, the [user guide](user-guide.md) is the place to start.
+How to run FlowDoc from source, build the installers, run the tests, and find your way around the code. If you only want to use FlowDoc, start with the [installation guide](installation.md) and the [user guide](user-guide.md).
 
 ## What you need
 
@@ -72,7 +72,7 @@ The first build downloads the packaging tools (about 150 MB) and takes a few min
 - `FlowDoc Setup <version>.exe`: an installer that adds Start-menu and desktop shortcuts. Double-click it and follow the wizard.
 - `FlowDoc <version>.exe`: a portable version that runs without installing.
 
-The app isn't code-signed, so Windows may warn before it runs. See [If your browser or Windows warns you](user-guide.md#if-your-browser-or-windows-warns-you).
+The app isn't code-signed, so Windows may warn before it runs. See [If your browser or Windows warns you](installation.md#if-your-browser-or-windows-warns-you).
 
 **Linux** (build on a Linux machine):
 

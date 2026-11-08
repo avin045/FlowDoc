@@ -8,26 +8,57 @@
 
 [![Latest release](https://img.shields.io/github/v/release/avin045/FlowDoc)](https://github.com/avin045/FlowDoc/releases/latest)
 [![License](https://img.shields.io/github/license/avin045/FlowDoc)](LICENSE)
-[![Platforms: Windows, Linux, Chrome and Edge](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20Chrome%20%7C%20Edge-0078D6)](#other-ways-to-run-flowdoc)
+[![Platforms: Windows, Linux, Chrome and Edge](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20Chrome%20%7C%20Edge-0078D6)](#install)
 
 [![Download for Windows](https://img.shields.io/badge/Download%20for%20Windows-4F46E5?style=for-the-badge)](https://github.com/avin045/FlowDoc/releases/latest)
 
-[![Chrome / Edge extension: any computer](https://img.shields.io/badge/Chrome%20%2F%20Edge%20extension-any%20computer-4285F4?logo=googlechrome&logoColor=white)](docs/user-guide.md#install-the-browser-extension)
-[![Linux: build from source](https://img.shields.io/badge/Linux-build%20from%20source-FCC624?logo=linux&logoColor=black)](docs/user-guide.md#run-flowdoc-on-linux)
+[![Chrome / Edge extension: any computer](https://img.shields.io/badge/Chrome%20%2F%20Edge%20extension-any%20computer-4285F4?logo=googlechrome&logoColor=white)](docs/installation.md#chrome-and-edge-extension)
+[![Linux: build from source](https://img.shields.io/badge/Linux-build%20from%20source-FCC624?logo=linux&logoColor=black)](docs/installation.md#linux)
 
-[Download](#download) · [User guide](docs/user-guide.md) · [Privacy](PRIVACY.md) · [Developers](docs/developers.md)
+[Install](#install) · [User guide](docs/user-guide.md) · [Privacy](PRIVACY.md) · [Developers](docs/developers.md)
 
 </div>
 
-## Download
+## Install
 
-On the release page, under **Assets**, click `FlowDoc.Setup.<version>.exe`, not "Source code".
+Pick your computer. Each one has full steps in the [installation guide](docs/installation.md).
 
-Windows 10 (version 2004 or newer) or 11 · 64-bit · free and open source (Apache-2.0)
+<details open>
+<summary><b>Windows</b>: download the installer (recommended)</summary>
 
-**Not on Windows?** On Linux, you can [build the desktop app from source](docs/user-guide.md#run-flowdoc-on-linux). On Linux or Mac, the [Chrome / Edge extension](docs/user-guide.md#install-the-browser-extension) records anything you do in the browser. See [Other ways to run FlowDoc](#other-ways-to-run-flowdoc).
+<br>
 
-Your browser or Windows may warn you before it runs, because FlowDoc is free and doesn't pay for a code-signing certificate. The source code is public. [What to click](docs/user-guide.md#if-your-browser-or-windows-warns-you).
+1. Click **Download for Windows** above, or open the [latest release](https://github.com/avin045/FlowDoc/releases/latest).
+2. Under **Assets**, click `FlowDoc.Setup.<version>.exe`, not "Source code".
+3. Open the file and follow the installer. Keep **Only for me**: no administrator rights needed.
+
+Needs Windows 10 (version 2004 or newer) or 11, 64-bit. Your browser or Windows may warn you before it runs, because FlowDoc is free and doesn't pay for a code-signing certificate. The source code is public. [What to click](docs/installation.md#if-your-browser-or-windows-warns-you) · [Full Windows steps](docs/installation.md#windows)
+
+</details>
+
+<details>
+<summary><b>Linux</b>: build from source</summary>
+
+<br>
+
+There's no Linux download yet. Build the desktop app from source and install it by following [Install on Linux](docs/installation.md#linux). The Linux build hasn't been tested on real hardware yet.
+
+Rather not build anything? The Chrome / Edge extension below works on Linux too.
+
+</details>
+
+<details>
+<summary><b>Chrome or Edge extension</b>: any computer (Windows, Mac, Linux)</summary>
+
+<br>
+
+1. At the top of this page, click **Code** → **Download ZIP**, and unzip it to a folder you'll keep (not Downloads).
+2. Open `chrome://extensions` (or `edge://extensions`) and turn on **Developer mode**.
+3. Click **Load unpacked** and select the `extension` folder inside it.
+
+The extension records what you do inside the browser only. [Full extension steps](docs/installation.md#chrome-and-edge-extension), including how to update without losing your guides.
+
+</details>
 
 ![FlowDoc's home screen, ready to capture a first guide](docs/screenshots/home-light.png)
 
@@ -54,17 +85,13 @@ Your browser or Windows may warn you before it runs, because FlowDoc is free and
 | Passwords kept out of steps and screenshots | |
 | Light and dark theme | |
 
-## Other ways to run FlowDoc
-
-- **Chrome or Edge extension:** records inside browser tabs, on Windows, Mac or Linux. No install tools needed: [install the browser extension](docs/user-guide.md#install-the-browser-extension).
-- **Linux:** build the desktop app from source. It hasn't been tested on real hardware yet. See [Run FlowDoc on Linux](docs/user-guide.md#run-flowdoc-on-linux).
-- **Try the editor in a browser:** the [web workspace](docs/developers.md#web-workspace) runs the editor and a sample guide locally, without recording.
-
 ## Documentation
 
 The full manual moved to the **[user guide](docs/user-guide.md)**: recording, editing, exporting, AI, Notion, troubleshooting and limitations.
 
+- [Installation guide](docs/installation.md): Windows, Linux, and the Chrome / Edge extension
 - [Developers guide](docs/developers.md): build from source, run the tests, how the recorder works
+- [Web workspace](docs/developers.md#web-workspace): try the editor and a sample guide in a browser, without recording
 - [Release notes](https://github.com/avin045/FlowDoc/releases)
 
 ## License

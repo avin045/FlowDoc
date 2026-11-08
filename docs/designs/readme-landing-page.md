@@ -321,6 +321,30 @@ Each of these changes something public, so each command is shown to the author a
 4. Squash-merge. Then apply the repository settings and release-description edits, and run the after-merge checks: the Contributing and Security tabs, the About box, and the release links.
 5. Rollback: revert the merge commit. Restore the old repository settings with the values above, and the release descriptions from the saved `<tag>.orig.md` files.
 
+## Changes after implementation
+
+**Separate installation guide, and install panels in the README** (author decision, 2026-11-08, after the first implementation commit).
+
+*   **New file `docs/installation.md`.** "Which version should I use?" and the three install sections moved out of `docs/user-guide.md` into their own file:
+    *   **Windows:** download, warnings, after you install, uninstall
+    *   **Linux:** build and install, where guides are stored, uninstall
+    *   **Chrome and Edge extension:** install, update, keyboard shortcut, uninstall
+
+    The user guide now starts at "Record a guide" and links to the installation guide.
+*   **README "Install" section.** It replaces the "Download" block and the "Other ways to run FlowDoc" section. GitHub Markdown has no tabs, so the three platforms are collapsible `<details>` panels; Windows is open by default. Each panel has the short steps and links to its section of `docs/installation.md`.
+*   **Badges.** The platforms badge and the two smaller badges (extension, Linux) link to `#install` and `docs/installation.md`.
+*   **Updated anchors.** These anchors from the plan above now live in `docs/installation.md`, not `docs/user-guide.md`:
+
+    | Old anchor (user guide) | New anchor (installation guide) |
+    | --- | --- |
+    | `#install-the-desktop-app-on-windows` | `#windows` |
+    | `#run-flowdoc-on-linux` | `#linux` |
+    | `#install-the-browser-extension` | `#chrome-and-edge-extension` (install steps under `#install-the-extension`) |
+    | `#if-your-browser-or-windows-warns-you` | unchanged name, new file |
+    | `#update-the-extension`, `#change-the-keyboard-shortcut`, `#uninstall-the-extension`, `#uninstall-the-desktop-app`, `#after-you-install`, `#download-and-run-the-installer`, `#which-version-should-i-use` | unchanged names, new file |
+
+*   **Checked:** the link check passes over all docs. The README, rendered by GitHub's Markdown API, shows the three panels, and the Download badge sits 307 px from the top of the README box (Goal 1: within 450 px).
+
 ## Alternatives Considered
 
 ### Alternative A: An animated GIF at the top of the README
