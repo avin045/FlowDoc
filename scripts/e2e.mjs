@@ -247,6 +247,8 @@ try {
   await app.click('dialog .tab-list button');
   await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
   await app.waitForSelector('.recording-banner');
+  const contToast = await app.locator('#toast').textContent();
+  check(contToast === `Capturing: new steps are added to “${beforeContinue.title}”`, 'a started Continue confirms which guide the steps go to', contToast);
   const contState = await send({ type: 'getState' });
   check(contState.active && contState.guideId === guideId && contState.stepCount === beforeContinue.steps.filter((s) => s.kind === 'action').length, 'capture continues the same guide and counts on', `${contState.stepCount} steps`);
   await page.click('#subject');
@@ -274,6 +276,135 @@ try {
   await page.waitForTimeout(500);
   const discarded = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
   check(discarded && !discarded.recording && JSON.stringify(snap(discarded)) === JSON.stringify(snap(continued)), 'Discard removes only the new steps and keeps the guide');
+
+  // ---------- Continue never fails quietly; the popup can continue ----------
+  console.log('\nContinue: errors and the popup');
+  await app.click('[data-act="continue"]');
+  await app.waitForSelector('dialog .tab-list button');
+  await send({ type: 'start', tabId }); // another capture starts meanwhile (a new guide)
+  await app.click('dialog .tab-list button');
+  await app.waitForFunction(() => document.querySelector('#toast')?.classList.contains('error'));
+  const errToast = await app.locator('#toast').textContent();
+  const activeUrl = await control.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url || '');
+  check(errToast === "Couldn't start capturing: another capture is already running." && activeUrl.includes('/app.html'), 'a Continue that cannot start says why, with the workspace brought back', `${errToast} (front: ${activeUrl.split('/').pop()})`);
+  await send({ type: 'discard' }); // removes the other capture's new guide
+  // The popup: with a guide edited in the last half hour, Continue is the big button.
+  const pop = await context.newPage();
+  await pop.goto(`chrome-extension://${extId}/popup.html`);
+  await page.bringToFront();
+  await pop.reload(); // its "current tab" is now the demo page
+  await pop.waitForSelector('#continue:not([hidden])');
+  const popUi = await pop.evaluate(() => ({
+    cont: document.querySelector('.continue-label').textContent,
+    start: document.querySelector('.start-label').textContent,
+    startBig: document.querySelector('#start').classList.contains('primary'),
+  }));
+  check(popUi.cont === `Continue “${beforeContinue.title}”` && popUi.start === 'Start new guide' && !popUi.startBig, 'the popup offers to continue the guide edited last, and Start new guide as the smaller button', JSON.stringify(popUi));
+  await pop.evaluate(() => document.querySelector('#continue').click()).catch(() => {}); // the popup closes itself
+  for (let i = 0; i < 20 && !(await send({ type: 'getState' })).active; i++) await page.waitForTimeout(150);
+  const popState = await send({ type: 'getState' });
+  check(popState.active && popState.guideId === guideId && popState.keepIds?.length === continued.steps.length, "the popup's Continue adds to that guide", JSON.stringify({ active: popState.active, same: popState.guideId === guideId }));
+  if (!pop.isClosed()) await pop.close();
+
+  // ---------- the recorder bar: movable, and a setting ----------
+  console.log('\nRecorder bar');
+  await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+  await page.waitForTimeout(400);
+  const barRect = () =>
+    page.evaluate(() => {
+      const r = document.querySelector('flowdoc-recorder')?.getBoundingClientRect();
+      return r && { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), vw: document.documentElement.clientWidth, vh: document.documentElement.clientHeight };
+    });
+  const bar0 = await barRect();
+  check(bar0 && Math.abs(bar0.x - 16) <= 1 && Math.abs(bar0.vh - (bar0.y + bar0.h) - 16) <= 1, 'the bar starts in the bottom-left corner', JSON.stringify(bar0));
+  const barState = await send({ type: 'getState' });
+  check(barState.bar === true && barState.pinTip === true, 'Automatic: FlowDoc is not pinned here, so the bar shows, with a tip to pin it', JSON.stringify({ bar: barState.bar, pinTip: barState.pinTip }));
+  // The handle sits at the bar's left end, in the middle of the bar (the tip is above it).
+  const grip = (r) => ({ x: r.x + 13, y: r.y + r.h - 19 });
+  const stepsBeforeDrag = barState.stepCount;
+  const g0 = grip(bar0);
+  await page.mouse.move(g0.x, g0.y);
+  await page.mouse.down();
+  await page.mouse.move(g0.x + 420, g0.y - 380, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+  const bar1 = await barRect();
+  const storedPos = await control.evaluate(async () => (await chrome.storage.local.get('flowdoc_bar_pos')).flowdoc_bar_pos || null);
+  check(Math.abs(bar1.x - (bar0.x + 420)) <= 3 && Math.abs(bar1.y - (bar0.y - 380)) <= 3 && storedPos, 'dragging the handle moves the bar, and the place is remembered', `${bar0.x},${bar0.y} → ${bar1.x},${bar1.y} ${JSON.stringify(storedPos)}`);
+  check((await send({ type: 'getState' })).stepCount === stepsBeforeDrag, 'dragging the bar adds no step');
+  await page.reload();
+  await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+  await page.waitForTimeout(600);
+  const bar2 = await barRect();
+  check(Math.abs(bar2.x - bar1.x) <= 2 && Math.abs(bar2.y - bar1.y) <= 2, 'the next page shows the bar in the same place', `${bar2.x},${bar2.y}`);
+  await page.setViewportSize({ width: 560, height: 420 });
+  await page.waitForTimeout(400);
+  const barSmall = await barRect();
+  check(barSmall.x >= 8 && barSmall.y >= 8 && barSmall.x + barSmall.w <= barSmall.vw - 7 && barSmall.y + barSmall.h <= barSmall.vh - 7, 'in a smaller window the bar stays inside it', JSON.stringify(barSmall));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(400);
+  // A step's screenshot never shows the bar, wherever it is.
+  const barAtShot = await barRect();
+  const stepsBeforeShot = (await send({ type: 'getState' })).stepCount;
+  await page.click('#subject');
+  for (let i = 0; i < 30 && (await send({ type: 'getState' })).stepCount === stepsBeforeShot; i++) await page.waitForTimeout(150);
+  await page.waitForTimeout(500);
+  const shotCheck = await app.evaluate(
+    async ({ id, r }) => {
+      const g = await window.flowdocApp.getGuide(id);
+      const s = g.steps.at(-1);
+      if (!s?.screenshot) return { error: 'no screenshot' };
+      const img = new Image();
+      img.src = s.screenshot;
+      await img.decode();
+      const k = img.naturalWidth / r.vw;
+      const c = document.createElement('canvas');
+      c.width = Math.round(r.w * k);
+      c.height = Math.round(r.h * k);
+      c.getContext('2d').drawImage(img, r.x * k, r.y * k, r.w * k, r.h * k, 0, 0, c.width, c.height);
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let dark = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < 120) dark++;
+      return { text: s.text, darkShare: Math.round((dark / (d.length / 4)) * 100) };
+    },
+    { id: guideId, r: barAtShot },
+  );
+  check(shotCheck.darkShare !== undefined && shotCheck.darkShare < 30, 'the moved bar is kept out of the screenshot', JSON.stringify(shotCheck));
+  // Settings > Capture > Recorder bar.
+  const setBar = (mode) =>
+    control.evaluate(async (m) => {
+      const got = (await chrome.storage.local.get('flowdoc_capture')).flowdoc_capture || {};
+      await chrome.storage.local.set({ flowdoc_capture: { ...got, bar: m } });
+    }, mode);
+  await setBar('never');
+  await page.waitForSelector('flowdoc-recorder', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const neverGone = !(await page.$('flowdoc-recorder'));
+  const stepsHidden = (await send({ type: 'getState' })).stepCount;
+  await page.click('#submit');
+  for (let i = 0; i < 30 && (await send({ type: 'getState' })).stepCount === stepsHidden; i++) await page.waitForTimeout(150);
+  const stillCapturing = (await send({ type: 'getState' })).stepCount > stepsHidden;
+  check(neverGone && stillCapturing, '"Never show it" removes the bar at once, and capturing goes on', JSON.stringify({ neverGone, stillCapturing }));
+  await setBar('always');
+  await page.waitForSelector('flowdoc-recorder', { state: 'attached', timeout: 5000 }).catch(() => {});
+  const alwaysState = await send({ type: 'getState' });
+  check(!!(await page.$('flowdoc-recorder')) && alwaysState.bar === true && alwaysState.pinTip === false, '"Always show it" brings it back, without the pin tip', JSON.stringify({ bar: alwaysState.bar, pinTip: alwaysState.pinTip }));
+  await setBar('auto');
+  await send({ type: 'pinTipDone' });
+  check((await send({ type: 'getState' })).pinTip === false, 'the pin tip, once closed, stays closed');
+  await page.waitForTimeout(400);
+  const bar3 = await barRect();
+  const g3 = grip(bar3);
+  await page.mouse.dblclick(g3.x, g3.y);
+  await page.waitForTimeout(500);
+  const bar4 = await barRect();
+  const posAfterReset = await control.evaluate(async () => (await chrome.storage.local.get('flowdoc_bar_pos')).flowdoc_bar_pos || null);
+  check(Math.abs(bar4.x - 16) <= 1 && Math.abs(bar4.vh - (bar4.y + bar4.h) - 16) <= 1 && !posAfterReset, 'double-clicking the handle puts the bar back in the corner', JSON.stringify(bar4));
+  await page.screenshot({ path: join(out, 'extension-recorder-bar.png') });
+  await send({ type: 'discard' });
+  await page.waitForTimeout(400);
+  const afterBarTests = await app.evaluate((id) => window.flowdocApp.getGuide(id), guideId);
+  check(JSON.stringify(snap(afterBarTests)) === JSON.stringify(snap(continued)), 'Discard leaves the guide as it was');
+  await app.bringToFront(); // the popup test put the demo page in front; the workspace draws only when shown
 
   // ---------- switching tabs while capturing ----------
   console.log('\nSwitching tabs');
@@ -777,6 +908,17 @@ try {
   await app.click('dialog .settings [data-close]');
 
   // ---------- library ----------
+  // Closing Settings redraws the open guide. Going to the library at that same
+  // moment must leave the library on screen, not the late redraw of the guide.
+  await app.evaluate(() => document.querySelector('.settings-btn').click());
+  await app.waitForSelector('dialog .settings');
+  await app.evaluate(() => {
+    document.querySelector('dialog .settings [data-close]').click();
+    location.hash = '#/';
+  });
+  await app.waitForTimeout(1500);
+  const raced = { cards: await app.locator('.card').count(), editor: !!(await app.$('[data-act="notion"]')) };
+  check(raced.cards === 2 && !raced.editor, 'going to the library right as Settings closes shows the library, not a late redraw of the guide', JSON.stringify(raced));
   await app.goto(`chrome-extension://${extId}/app.html#/`);
   await app.waitForSelector('.card');
   check((await app.locator('.card').count()) === 2, 'guide and its translation listed in the library');

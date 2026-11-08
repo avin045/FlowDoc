@@ -65,7 +65,7 @@ The extension records what you do inside the browser only. [Full extension steps
 > [!NOTE]
 > No FlowDoc account, no FlowDoc server, no analytics. Your guides stay on your PC. Data leaves only if you turn on the optional AI (your own Gemini or Groq key) or Save to Notion. [Privacy policy](PRIVACY.md).
 >
-> FlowDoc records only after you press **New capture**, a recorder bar stays visible while it does, and passwords are never saved.
+> FlowDoc records only after you press **New capture**, a recorder bar (or, in the extension, the toolbar icon's badge) shows while it does, and passwords are never saved.
 
 ## How it works
 

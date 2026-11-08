@@ -51,8 +51,28 @@ async function getState() {
 async function setState(state) {
   await chrome.storage.local.set({ [STATE_KEY]: state });
   await updateBadge(state);
-  await broadcast({ type: 'state', state });
-  return state;
+  const shown = { ...state, ...(await barInfo()) };
+  await broadcast({ type: 'state', state: shown });
+  return shown;
+}
+
+// The recorder bar on the page: Settings > Capture > "Recorder bar".
+// Automatic shows it only while FlowDoc's icon isn't pinned to the toolbar;
+// pinned, the icon's badge shows the capture instead. `pinTip` asks the bar to
+// suggest pinning, until that tip is closed once.
+const PIN_TIP_KEY = 'flowdoc_pin_tip_done';
+async function barInfo() {
+  const got = await chrome.storage.local.get([CAPTURE_KEY, PIN_TIP_KEY]);
+  const mode = got[CAPTURE_KEY]?.bar || 'auto';
+  if (mode === 'always') return { bar: true, pinTip: false };
+  if (mode === 'never') return { bar: false, pinTip: false };
+  const pinned = await (chrome.action.getUserSettings?.() || Promise.resolve(null)).then((s) => !!s?.isOnToolbar, () => false);
+  return { bar: !pinned, pinTip: !pinned && !got[PIN_TIP_KEY] };
+}
+// Tells the pages again when the bar setting or the pinned state changes mid-capture.
+async function refreshBar() {
+  const state = await getState();
+  if (state.active) await broadcast({ type: 'state', state: { ...state, ...(await barInfo()) } });
 }
 
 async function updateBadge(state) {
@@ -440,6 +460,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handle = async () => {
     switch (msg?.type) {
       case 'getState':
+        return { ...(await getState()), ...(await barInfo()) };
+      case 'pinTipDone':
+        await chrome.storage.local.set({ [PIN_TIP_KEY]: true });
+        await refreshBar();
         return getState();
       case 'start':
         return start(msg.tabId, { guideId: msg.guideId });
@@ -543,6 +567,11 @@ chrome.runtime.onStartup.addListener(async () => {
   const state = await getState();
   if (state.active) await stop({ open: false });
 });
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[CAPTURE_KEY]) refreshBar();
+});
+chrome.action.onUserSettingsChanged?.addListener(() => refreshBar());
 
 // After an update or reload: the recorder script belongs to a capture in progress only.
 chrome.runtime.onInstalled.addListener(async () => {

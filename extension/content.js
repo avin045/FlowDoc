@@ -401,6 +401,7 @@
 
   function onKeyDown(event) {
     if (!recording() || !event.isTrusted) return;
+    if (widget && event.composedPath().includes(widget.host)) return; // keys on the recorder bar itself
     const el = event.composedPath()[0];
     const keyName = { Enter: 'Enter', Escape: 'Esc', Tab: 'Tab' }[event.key];
     if (!keyName) return;
@@ -461,12 +462,50 @@
 
   // ---------- recording widget ----------
 
+  // The bar can be dragged by its handle anywhere in the window; where it was
+  // put is kept (as a share of the free space, so it lands in the same area
+  // on any window size) for every page and later captures. Double-clicking the
+  // handle puts it back in the bottom-left corner.
+  const BAR_POS_KEY = 'flowdoc_bar_pos';
+  const EDGE = 8; // closest the bar gets to the window's edge
+  let barPos = null; // { fx, fy } in 0..1, or null for the corner
+  let showBar = true; // Settings > Capture > "Recorder bar" (background.js decides)
+  let pinTip = false;
+  try {
+    chrome.storage.local.get(BAR_POS_KEY).then((got) => {
+      barPos = validPos(got[BAR_POS_KEY]);
+      if (widget) placeWidget();
+    }, () => {});
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !(BAR_POS_KEY in changes)) return;
+      barPos = validPos(changes[BAR_POS_KEY].newValue);
+      if (widget && !widget.dragging) placeWidget();
+    });
+  } catch {
+    // extension reloaded
+  }
+  function validPos(p) {
+    const ok = (n) => typeof n === 'number' && n >= 0 && n <= 1;
+    return p && ok(p.fx) && ok(p.fy) ? { fx: p.fx, fy: p.fy } : null;
+  }
+
   const WIDGET_CSS = `
     :host { all: initial; }
-    .bar { position: fixed; left: 16px; bottom: 16px; z-index: 2147483647; display: flex; align-items: center; gap: 4px;
-      padding: 6px 6px 6px 12px; border-radius: 999px; background: #0f172a; color: #f8fafc;
+    .wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .bar { display: flex; align-items: center; gap: 4px;
+      padding: 6px 6px 6px 4px; border-radius: 999px; background: #0f172a; color: #f8fafc;
       font: 500 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 8px 30px rgba(15,23,42,.35);
       user-select: none; }
+    .grip { all: unset; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 26px; margin-right: 4px;
+      border-radius: 999px; color: #64748b; cursor: grab; touch-action: none; }
+    .grip:hover { color: #cbd5e1; background: rgba(255,255,255,.08); }
+    .grip:active { cursor: grabbing; }
+    .grip:focus-visible { outline: 2px solid #818cf8; }
+    .tip { display: flex; align-items: center; gap: 8px; max-width: 300px; padding: 7px 8px 7px 12px; border-radius: 10px;
+      background: #1e293b; color: #e2e8f0; font: 400 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+      box-shadow: 0 8px 30px rgba(15,23,42,.35); }
+    .tip[hidden] { display: none; }
+    .tip button { padding: 4px 7px; color: #94a3b8; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: #f43f5e; margin-right: 6px; animation: pulse 1.4s infinite; }
     .paused .dot { background: #94a3b8; animation: none; }
     .label { margin-right: 6px; white-space: nowrap; }
@@ -485,20 +524,122 @@
     play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
   };
+
+  // The window area the bar may use (without scroll bars).
+  const viewSize = () => ({
+    w: Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth),
+    h: Math.min(window.innerHeight, document.documentElement.clientHeight || window.innerHeight),
+  });
+  function setWidgetPos(x, y) {
+    const s = widget.host.style;
+    s.setProperty('left', `${Math.round(x)}px`, 'important');
+    s.setProperty('top', `${Math.round(y)}px`, 'important');
+  }
+  // Keeps x/y inside the window for the bar's current size.
+  function clampPos(x, y) {
+    const r = widget.host.getBoundingClientRect();
+    const { w, h } = viewSize();
+    const maxX = Math.max(EDGE, w - r.width - EDGE);
+    const maxY = Math.max(EDGE, h - r.height - EDGE);
+    return { x: Math.min(Math.max(x, EDGE), maxX), y: Math.min(Math.max(y, EDGE), maxY), maxX, maxY };
+  }
+  function placeWidget() {
+    if (!widget) return;
+    const r = widget.host.getBoundingClientRect();
+    const { w, h } = viewSize();
+    const maxX = Math.max(EDGE, w - r.width - EDGE);
+    const maxY = Math.max(EDGE, h - r.height - EDGE);
+    const x = barPos ? EDGE + barPos.fx * (maxX - EDGE) : 16;
+    const y = barPos ? EDGE + barPos.fy * (maxY - EDGE) : h - r.height - 16;
+    const c = clampPos(x, y);
+    setWidgetPos(c.x, c.y);
+  }
+  function saveWidgetPos() {
+    const r = widget.host.getBoundingClientRect();
+    const c = clampPos(r.left, r.top);
+    const share = (v, max) => (max > EDGE ? Math.min(1, Math.max(0, (v - EDGE) / (max - EDGE))) : 0);
+    barPos = { fx: share(c.x, c.maxX), fy: share(c.y, c.maxY) };
+    try {
+      chrome.storage.local.set({ [BAR_POS_KEY]: barPos }).catch(() => {});
+    } catch {}
+  }
+  function resetWidgetPos() {
+    barPos = null;
+    try {
+      chrome.storage.local.remove(BAR_POS_KEY).catch(() => {});
+    } catch {}
+    placeWidget();
+  }
+  window.addEventListener('resize', () => widget && placeWidget());
 
   function mountWidget() {
     if (widget) return;
     const host = document.createElement('flowdoc-recorder');
+    for (const [k, v] of [['position', 'fixed'], ['z-index', '2147483647'], ['margin', '0'], ['right', 'auto'], ['bottom', 'auto'], ['display', 'block']])
+      host.style.setProperty(k, v, 'important');
     const root = host.attachShadow({ mode: 'closed' });
     root.innerHTML = `<style>${WIDGET_CSS}</style>
-      <div class="bar" role="toolbar" aria-label="FlowDoc recorder">
-        <span class="dot"></span><span class="label"></span><span class="count"></span>
-        <button class="toggle" title="Pause capture"></button>
-        <button class="discard" title="Discard this recording">${ICONS.trash}</button>
-        <button class="done" title="Stop and build the guide">${ICONS.check}<span>Done</span></button>
+      <div class="wrap">
+        <div class="tip" hidden><span>Tip: pin FlowDoc to the toolbar and this bar hides; the icon shows the capture instead.</span><button class="tip-x" title="Close this tip">✕</button></div>
+        <div class="bar" role="toolbar" aria-label="FlowDoc recorder">
+          <button class="grip" title="Drag to move. Double-click to put it back in the corner." aria-label="Move the recorder bar">${ICONS.grip}</button>
+          <span class="dot"></span><span class="label"></span><span class="count"></span>
+          <button class="toggle" title="Pause capture"></button>
+          <button class="discard" title="Discard this recording">${ICONS.trash}</button>
+          <button class="done" title="Stop and build the guide">${ICONS.check}<span>Done</span></button>
+        </div>
       </div>`;
     const $ = (s) => root.querySelector(s);
+    // Dragging: the page never sees these presses (the recorder skips its own bar).
+    const grip = $('.grip');
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = host.getBoundingClientRect();
+      const dx = e.clientX - r.left;
+      const dy = e.clientY - r.top;
+      grip.setPointerCapture(e.pointerId);
+      widget.dragging = true;
+      const move = (ev) => {
+        const c = clampPos(ev.clientX - dx, ev.clientY - dy);
+        setWidgetPos(c.x, c.y);
+      };
+      const end = () => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', end);
+        grip.removeEventListener('pointercancel', end);
+        if (!widget) return;
+        widget.dragging = false;
+        saveWidgetPos();
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', end);
+      grip.addEventListener('pointercancel', end);
+    });
+    grip.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      resetWidgetPos();
+    });
+    // Arrow keys move it too (Shift for bigger steps).
+    grip.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 48 : 16;
+      const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = host.getBoundingClientRect();
+      const c = clampPos(r.left + d[0], r.top + d[1]);
+      setWidgetPos(c.x, c.y);
+      saveWidgetPos();
+    });
+    $('.tip-x').addEventListener('click', () => {
+      $('.tip').hidden = true;
+      send({ type: 'pinTipDone' });
+      placeWidget();
+    });
     // A click still being held is decided before pausing or stopping.
     $('.toggle').addEventListener('click', async () => {
       if (!state.paused) await settleNow();
@@ -512,7 +653,7 @@
       if (confirm('Discard this recording? The captured steps will be deleted.')) send({ type: 'discard' }).then(applyState);
     });
     document.documentElement.appendChild(host);
-    widget = { host, root, $ };
+    widget = { host, root, $, dragging: false };
   }
 
   function renderWidget() {
@@ -523,21 +664,26 @@
     $('.count').textContent = `${state.stepCount || 0} step${state.stepCount === 1 ? '' : 's'}`;
     $('.toggle').innerHTML = state.paused ? ICONS.play : ICONS.pause;
     $('.toggle').title = state.paused ? 'Resume capture' : 'Pause capture';
+    $('.tip').hidden = !pinTip;
+    if (!widget.dragging) placeWidget(); // its size may have changed
   }
 
   function applyState(next) {
     if (!next || next.error || typeof next.active !== 'boolean') return;
     const wasRecording = recording();
     state = next;
+    // Replies to step messages leave these out: keep what the last full state said.
+    if ('bar' in next) showBar = next.bar !== false;
+    if ('pinTip' in next) pinTip = !!next.pinTip;
     if (recording() !== wasRecording) watchPage(recording());
-    if (state.active) {
+    if (state.active && showBar) {
       mountWidget();
       renderWidget();
     } else if (widget) {
       widget.host.remove();
       widget = null;
-      draft = null;
     }
+    if (!state.active) draft = null;
   }
 
   chrome.runtime.onMessage.addListener((msg) => {

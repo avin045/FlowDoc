@@ -15,9 +15,13 @@
 
   <section id="idle" hidden>
     <p class="lead">Capture a process once, get a step-by-step guide with screenshots.</p>
-    <button id="start" class="primary big">
-      <span class="rec"></span> Start capture
+    <button id="continue" class="primary big" hidden>
+      <span class="rec"></span> <span class="continue-label">Continue</span>
     </button>
+    <button id="start" class="primary big">
+      <span class="rec"></span> <span class="start-label">Start capture</span>
+    </button>
+    <p id="startError" class="warn" hidden></p>
     <p class="hint">Shortcut: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></p>
     <p id="restricted" class="warn" hidden>This page can't be captured. Open a website first, then start capture.</p>
     <h2>Recent guides</h2>

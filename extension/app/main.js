@@ -188,6 +188,7 @@ async function renderHome() {
   document.title = 'FlowDoc — Guides';
   renderSidebar(null);
   const guides = await listGuides();
+  if (/^#\/guide\//.test(location.hash)) return; // a guide was opened meanwhile
   view.innerHTML = `
     <div class="home">
       <div class="home-head">
@@ -495,7 +496,42 @@ async function startCaptureDialog({ guideId } = {}) {
   }
   if (guideId && (await chrome.runtime.sendMessage({ type: 'getState' }))?.active) return toast('A capture is already running');
   if (guideId) await flushSave();
-  const begin = (tabId) => chrome.runtime.sendMessage({ type: 'start', tabId, guideId });
+  const title = guideId ? (await getGuide(guideId))?.title || 'this guide' : '';
+  // Starts capturing in `tab` (switching to it first when `show`). Nothing
+  // fails quietly: on any problem the workspace comes back to the front and
+  // says what went wrong, so a capture is never assumed to be running.
+  const begin = async (tab, { show = true } = {}) => {
+    let res;
+    try {
+      if (show) {
+        await chrome.tabs.update(tab.id, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+      }
+      res = await chrome.runtime.sendMessage({ type: 'start', tabId: tab.id, guideId });
+    } catch (err) {
+      res = { error: err?.message || String(err) };
+    }
+    const problem =
+      !res ? "the extension didn't answer. Reload this page and try again."
+      : res.error ? res.error
+      : !res.active ? 'the capture did not start.'
+      : guideId && res.guideId !== guideId ? 'another capture is already running.'
+      : '';
+    if (problem) {
+      const me = await chrome.tabs.getCurrent().catch(() => null);
+      if (me) {
+        await chrome.tabs.update(me.id, { active: true }).catch(() => {});
+        await chrome.windows.update(me.windowId, { focused: true }).catch(() => {});
+      }
+      toast(`Couldn't start capturing: ${problem}`, { error: true });
+      return false;
+    }
+    if (guideId) {
+      toast(`Capturing: new steps are added to “${title}”`);
+      route();
+    }
+    return true;
+  };
   const tabs = (await chrome.tabs.query({})).filter((t) => /^(https?|file):/.test(t.url || ''));
   const dlg = h(`<dialog><div class="dlg">
     <h2>${guideId ? 'Continue capturing' : 'Start a capture'}</h2>
@@ -514,12 +550,9 @@ async function startCaptureDialog({ guideId } = {}) {
     $('span', b).textContent = t.title || t.url;
     if (t.favIconUrl?.startsWith('http')) $('img', b).src = t.favIconUrl;
     else $('img', b).remove();
-    b.addEventListener('click', async () => {
+    b.addEventListener('click', () => {
       dlg.close();
-      await chrome.tabs.update(t.id, { active: true });
-      await chrome.windows.update(t.windowId, { focused: true });
-      await begin(t.id);
-      if (guideId) route();
+      begin(t);
     });
     list.append(b);
   }
@@ -527,14 +560,25 @@ async function startCaptureDialog({ guideId } = {}) {
     e.preventDefault();
     const url = $('input', dlg).value;
     dlg.close();
-    const tab = await chrome.tabs.create({ url, active: true });
-    const onUpdated = async (id, info) => {
-      if (id !== tab.id || info.status !== 'complete') return;
+    let tab;
+    try {
+      tab = await chrome.tabs.create({ url, active: true });
+    } catch (err) {
+      return toast(`Couldn't open ${url}: ${err?.message || err}`, { error: true });
+    }
+    let started = false;
+    const go = (t) => {
+      if (started) return;
+      started = true;
       chrome.tabs.onUpdated.removeListener(onUpdated);
-      await begin(tab.id);
-      if (guideId) route();
+      begin(t, { show: false });
     };
+    // Loaded means the web page itself, not the blank tab before it.
+    const loaded = (t) => t?.status === 'complete' && /^(https?|file):/.test(t.url || '');
+    const onUpdated = (id, info, t) => id === tab.id && info.status === 'complete' && loaded(t) && go(t);
     chrome.tabs.onUpdated.addListener(onUpdated);
+    // A page that finished loading before the listener was added.
+    chrome.tabs.get(tab.id).then((t) => loaded(t) && go(t), () => {});
   });
   $('[data-close]', dlg).addEventListener('click', () => dlg.close());
   dlg.addEventListener('close', () => dlg.remove());
@@ -655,7 +699,12 @@ document.addEventListener('keydown', (e) => {
 // ---------- editor: view ----------
 
 async function renderEditor(id) {
+  // Drawing waits for storage. If the address moved on meanwhile (for example to
+  // the library, right after Settings closed and asked for a redraw), this
+  // late redraw must not replace what's now on screen.
+  const stillHere = () => location.hash.startsWith(`#/guide/${id}`);
   const guide = await getGuide(id);
+  if (!stillHere()) return;
   if (!guide) {
     view.innerHTML = `<div class="home"><div class="empty-state"><h2>Guide not found</h2><p>It may have been deleted.</p><div class="actions"><a class="primary" href="#/">Back to all guides</a></div></div></div>`;
     renderSidebar(null);
@@ -679,6 +728,7 @@ async function renderEditor(id) {
   } catch {}
   const apps = [...new Set(guide.steps.map((s) => s.app).filter(Boolean))];
   const aiOn = hasAi && (await aiEnabled());
+  if (!stillHere()) return;
   const showAi = aiOn && !ro;
 
   view.innerHTML = `

@@ -15,7 +15,8 @@ const SECRET_NAMES = [...Object.keys(AI_PROVIDERS), 'notion'];
 const NOTION_KEY = 'flowdoc_notion';
 // The extension's capture settings; background.js reads them while recording.
 const CAPTURE_KEY = 'flowdoc_capture';
-const CAPTURE_DEFAULTS = { ignoreRepeats: true };
+// bar: the recorder bar on pages, 'auto' (hidden while the icon is pinned), 'always' or 'never'.
+const CAPTURE_DEFAULTS = { ignoreRepeats: true, bar: 'auto' };
 
 const DEFAULTS = {
   provider: 'off',

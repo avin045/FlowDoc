@@ -90,7 +90,18 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
     <h3>Typed text</h3>
     <label class="check"><input type="checkbox" name="typedText"> Include typed text in steps (passwords are always hidden)</label>
     <label class="check"><input type="checkbox" name="unknownFieldText"> Also include keystrokes when the field type can't be detected</label>
-    ` : ''}
+    ` : `
+    <h3>Recorder bar</h3>
+    <div class="field-row">
+      <label for="barMode">On the page</label>
+      <select id="barMode" name="barMode">
+        <option value="auto">Automatic: hide it when FlowDoc is pinned</option>
+        <option value="always">Always show it</option>
+        <option value="never">Never show it</option>
+      </select>
+    </div>
+    <p class="hint">While FlowDoc's icon is pinned to the toolbar, its badge shows the capture and its menu stops it (or press <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>). Drag the bar by its handle to move it; double-click the handle to put it back in the corner.</p>
+    `}
     <h3>Steps</h3>
     <label class="check"><input type="checkbox" name="ignoreRepeats"> Ignore repeated clicks that change nothing</label>
     <p class="hint">Clicking, double-clicking or right-clicking the same thing again (waiting for a slow page, or unsure the click worked) doesn't add another step when that click changed nothing. Clicks that change something are always kept.</p>`,
@@ -241,6 +252,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
     }
     $('.test-result').textContent = '';
     f.ignoreRepeats.checked = s.capture?.ignoreRepeats !== false;
+    if (f.barMode) f.barMode.value = ['auto', 'always', 'never'].includes(s.capture?.bar) ? s.capture.bar : 'auto';
     f.notionToken.value = '';
     f.notionToken.placeholder = s.keys.notion ? 'Connected — paste a new secret to replace it' : 'ntn_…';
     $('[data-act="disconnectNotion"]').hidden = !s.keys.notion;
@@ -296,6 +308,7 @@ export async function openSettingsDialog({ toast, onClose, tab } = {}) {
   f.customModel.addEventListener('change', () => {
     if (f.customModel.value.trim()) save({ ai: { models: { [s.ai.provider]: f.customModel.value.trim() } } });
   });
+  f.barMode?.addEventListener('change', () => save({ capture: { bar: f.barMode.value } }));
   for (const name of [...(desktop ? ['hideWindow', 'hideBar', 'typedText', 'unknownFieldText'] : []), 'ignoreRepeats'])
     f[name].addEventListener('change', async () => {
       await save({ capture: { [name]: f[name].checked } });

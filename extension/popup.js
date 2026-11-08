@@ -49,11 +49,33 @@ const capturable = /^(https?|file):/.test(tab?.url || '') && !/^https:\/\/chrome
 $('#start').disabled = !capturable;
 $('#restricted').hidden = capturable;
 
-$('#start').addEventListener('click', async () => {
-  $('#start').disabled = true;
-  await send({ type: 'start', tabId: tab.id });
-  window.close();
-});
+// A guide recorded or edited in the last half hour can be continued from here:
+// it takes the big button, and starting a new guide becomes the smaller one.
+const RECENT_MS = 30 * 60 * 1000;
+const latest = (await listGuides()).filter((g) => !g.recording).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+const recent = latest && Date.now() - (latest.updatedAt || 0) < RECENT_MS ? latest : null;
+if (recent) {
+  $('#continue').hidden = false;
+  $('#continue').disabled = !capturable;
+  $('.continue-label').textContent = `Continue “${recent.title || 'Untitled guide'}”`;
+  $('#continue').title = 'Add the steps you record now after the last step of this guide';
+  $('#start').classList.replace('primary', 'secondary');
+  $('#start').classList.add('wide');
+  $('.start-label').textContent = 'Start new guide';
+}
+
+async function begin(button, guideId) {
+  $('#continue').disabled = $('#start').disabled = true;
+  const res = await send({ type: 'start', tabId: tab.id, ...(guideId ? { guideId } : {}) }).catch((err) => ({ error: err?.message || String(err) }));
+  const problem = !res ? "the extension didn't answer." : res.error || (!res.active ? 'the capture did not start.' : guideId && res.guideId !== guideId ? 'another capture is already running.' : '');
+  if (!problem) return window.close();
+  $('#startError').textContent = `Couldn't start capturing: ${problem}`;
+  $('#startError').hidden = false;
+  $('#continue').disabled = $('#start').disabled = !capturable;
+  button.focus();
+}
+$('#continue').addEventListener('click', () => begin($('#continue'), recent.id));
+$('#start').addEventListener('click', () => begin($('#start')));
 $('#stop').addEventListener('click', async () => {
   await send({ type: 'stop' });
   window.close();

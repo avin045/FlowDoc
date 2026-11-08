@@ -62,12 +62,14 @@ These options are in the desktop app only.
 2. Click the **FlowDoc** icon in the toolbar. The popup opens.
 3. Click **Start capture**. You can also press `Alt+Shift+R` without opening the popup.
    - The popup's start button is greyed out on browser pages such as `chrome://…`, the Web Store or the new-tab page. Open a normal website first.
-4. A dark **recorder bar** appears at the bottom-left of the page. It shows the number of captured steps, plus these buttons:
+4. The FlowDoc icon shows a red badge with the number of captured steps. While FlowDoc isn't pinned to the toolbar, a dark **recorder bar** also appears at the bottom-left of the page. It shows the step count, plus these buttons:
    - **Pause / Resume**: pause while you do something that shouldn't be in the guide.
    - **Trash**: discard the whole recording.
    - **Done**: stop and build the guide.
+
+   If the bar covers something, drag it by its handle (⋮⋮ at its left end) anywhere in the window. It stays there on the next pages and in later captures. Double-click the handle to put it back in the corner. Pin FlowDoc (the puzzle-piece icon → the pin next to FlowDoc) and the bar hides, because the icon's badge shows the capture instead. To choose for yourself, see [Capture settings](#capture-settings).
 5. Do your task normally: click buttons and links, type into fields, choose from dropdowns, tick checkboxes, press Enter. You can move between pages and tabs. The recording keeps going.
-6. Click **Done** on the recorder bar. You can also click **Stop & build guide** in the popup, or press `Alt+Shift+R` again.
+6. Click **Done** on the recorder bar, or click the FlowDoc icon and then **Stop & build guide**, or press `Alt+Shift+R` again.
 7. A new tab opens with your guide in the **FlowDoc workspace**. Continue with [Edit a guide](#edit-a-guide) to edit and export it.
 
 You can also start a capture from the workspace. Click **New capture** in the left sidebar, then pick an open tab or type a web address.
@@ -77,7 +79,8 @@ You can also start a capture from the workspace. Click **New capture** in the le
 Open a guide and click **● Continue capturing** in the toolbar to record more steps into it, for example the next part of a process you documented yesterday.
 
 - **Desktop app:** capture starts straight away, the same as **New capture**.
-- **Extension:** pick the tab to carry on in. A **Navigate to** step is added only when that page differs from where the guide left off.
+- **Extension:** pick the tab to carry on in. A **Navigate to** step is added only when that page differs from where the guide left off. The workspace confirms which guide the steps go to. If the capture can't start, the workspace comes back to the front and says why.
+- **Extension, from the toolbar:** for a guide you recorded or edited in the last 30 minutes, the popup's big button is **Continue "*guide title*"**. It carries on in the current tab. **Start new guide** is the smaller button under it.
 - New steps go **after the last step**. Your title, description, edits and earlier steps stay as they are, and step numbers carry on (step 13, 14, …).
 - The guide is locked while capturing and unlocks when you click **Done**.
 - **Discard** removes only the steps from this session. The guide itself is kept.
@@ -139,6 +142,7 @@ Open **Settings → Capture**:
 | Hide the recorder bar from screen recordings and meetings | On by default: screen recorders and meeting apps (Teams, Zoom, Meet, OBS…) don't see the bar or the area border. Untick it when you're recording a video or sharing your screen and want viewers to see the bar too. Either way, clicks on the bar are never steps, and the bar stays out of FlowDoc's own screenshots (with the box unticked, viewers see the bar blink briefly at each step while FlowDoc takes its shot). Linux can't hide windows from captures, so there the bar is always visible to other apps and the box is greyed out. |
 | Include typed text in steps | Shows what you typed, for example Type "Q3 report"… Passwords are always hidden. |
 | Also include keystrokes when the field type can't be detected | For apps that don't report their text fields. Off by default, because FlowDoc can't tell whether such a field holds a password. |
+| Recorder bar on the page (extension) | **Automatic** (the default) shows the bar only while FlowDoc isn't pinned to the toolbar; pinned, the icon's badge shows the capture. **Always show it** or **Never show it** decide for you. A change during a capture applies straight away. Drag the bar by its handle to move it. |
 | Ignore repeated clicks that change nothing | On by default. Clicking the same thing again (waiting for a slow app, or unsure the click worked) doesn't add another step when that click changed nothing. FlowDoc holds a repeated click for a moment and compares the app's window before it with the screen at your next action (or 1.5 seconds later). It also drops the click when nothing changed since the previous click. Any visible change, even a number going from 1 to 2, keeps the step. What comes and goes with the mouse pointer doesn't count: the pointer itself, and tooltips or bubbles that pop up just below it (such as Chrome's **Define** after double-clicking a word). Double-clicking the same word again also doesn't count, even if this time the space after it gets selected too. Clicks, double-clicks and right-clicks are each compared with the same kind, so a click followed by a double-click stays two steps. The extension has the same setting. |
 
 The **General** tab sets how clicks are marked on screenshots (see [Blur, crop or change the highlight](#blur-crop-or-change-the-highlight)) and shows the keyboard shortcut:

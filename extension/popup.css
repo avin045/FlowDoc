@@ -48,6 +48,12 @@ button { font: inherit; cursor: pointer; border-radius: 8px; }
 .secondary { flex: 1; border: 1px solid var(--line); background: var(--soft); color: var(--fg); padding: 8px; }
 .secondary:hover { border-color: var(--muted); }
 .danger { color: var(--rec); }
+[hidden] { display: none !important; }
+/* With a recent guide: Continue is the big button, Start new guide the smaller one under it. */
+.secondary.wide { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; padding: 9px 12px; font-weight: 600; }
+.secondary:disabled { opacity: .5; cursor: not-allowed; }
+.continue-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#startError { margin: 8px 0 0; }
 .row { display: flex; gap: 8px; margin-top: 8px; }
 .rec { width: 10px; height: 10px; border-radius: 50%; background: #fb7185; display: inline-block; }
 .primary .rec { background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.3); }
