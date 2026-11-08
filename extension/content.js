@@ -45,6 +45,78 @@
     return res;
   }
 
+  // ---------- password fields ----------
+  // A password must never be readable in a guide: not in the step text, and
+  // not in a screenshot. A field counts as a password field if it is one, was
+  // one earlier ("Show password" turns it into a plain text field), or is
+  // labelled as one. Every screenshot has these fields covered (background.js),
+  // so even their dots don't show how long the password is.
+  const SECRET_NAME =
+    /pass(?:word|wd|code|phrase)|\bpwd\b|\bpin\b|kennwort|passwort|mot de passe|contrase(?:ñ|n)a|senha|wachtwoord|пароль|密码|密碼|パスワード|비밀번호|पासवर्ड|கடவுச்சொல்|పాస్‌?వర్డ్|ಪಾಸ್‌?ವರ್ಡ್|പാസ്‌?വേഡ്|পাসওয়ার্ড|પાસવર્ડ|ਪਾਸਵਰਡ|كلمة (?:السر|المرور)|סיסמה|şifre|hasło|heslo|jelszó|parola|lösenord|adgangskode|passord|salasana/i;
+  const TEXT_TYPES = new Set(['text', 'password', 'tel', 'number', 'search', '']);
+  const wasPassword = new WeakSet();
+
+  function isSecretField(el) {
+    if (el?.tagName !== 'INPUT') return false; // also inputs of same-site frames (another window's HTMLInputElement)
+    if (el.type === 'password') {
+      wasPassword.add(el);
+      return true;
+    }
+    if (wasPassword.has(el)) return true;
+    const auto = String(el.autocomplete || '').toLowerCase();
+    if (/(current|new)-password|one-time-code/.test(auto)) return true;
+    if (!TEXT_TYPES.has(el.type)) return false;
+    return SECRET_NAME.test([labelOf(el), el.name, el.id, el.placeholder, el.getAttribute('aria-label')].filter(Boolean).join(' '));
+  }
+
+  // Remembered as soon as one is used, in case it is switched to plain text later.
+  const notePassword = (e) => {
+    if (e.target instanceof HTMLInputElement && e.target.type === 'password') wasPassword.add(e.target);
+  };
+  document.addEventListener('focusin', notePassword, true);
+  document.addEventListener('pointerdown', notePassword, true);
+
+  // Inputs of the page, including those inside web components (open shadow
+  // roots) and inside frames from the same site, each with the offset of its
+  // frame in this page's viewport. Frames from other sites can't be looked
+  // into; their password fields are not found (see README).
+  function* allInputs(root = document, dx = 0, dy = 0, depth = 0) {
+    const roots = [root];
+    while (roots.length) {
+      const node = roots.pop();
+      for (const el of node.querySelectorAll('*')) {
+        if (el.tagName === 'INPUT') yield { el, dx, dy };
+        if (el.shadowRoot) roots.push(el.shadowRoot);
+        if ((el.tagName === 'IFRAME' || el.tagName === 'FRAME') && depth < 3) {
+          let doc = null;
+          try {
+            doc = el.contentDocument;
+          } catch {
+            /* another site's frame */
+          }
+          if (!doc?.documentElement) continue;
+          const r = el.getBoundingClientRect();
+          yield* allInputs(doc, dx + r.left + el.clientLeft, dy + r.top + el.clientTop, depth + 1);
+        }
+      }
+    }
+  }
+
+  // Boxes (viewport CSS pixels) of the password fields on screen now.
+  function secretRects() {
+    const out = [];
+    for (const { el, dx, dy } of allInputs()) {
+      if (out.length >= 20) break;
+      if (!isSecretField(el)) continue;
+      const r = el.getBoundingClientRect();
+      const x = r.left + dx;
+      const y = r.top + dy;
+      if (r.width <= 0 || r.height <= 0 || y + r.height < 0 || x + r.width < 0 || y > innerHeight || x > innerWidth) continue;
+      out.push({ x: x - 3, y: y - 3, w: r.width + 6, h: r.height + 6 });
+    }
+    return out;
+  }
+
   // `settle`: a held repeated click to decide first (see "repeated clicks").
   async function sendSteps(steps, { capture = true, settle = null } = {}) {
     steps = steps.filter(Boolean);
@@ -53,6 +125,7 @@
       url: location.href,
       title: document.title,
       viewport: { w: window.innerWidth, h: window.innerHeight },
+      secrets: capture ? secretRects() : [],
     };
     return postSteps({ steps, page, capture, ...(settle ? { settle } : {}) }, { hide: capture });
   }
@@ -180,7 +253,7 @@
     const el = d.el;
     const label = labelOf(el);
     const value = fieldValue(el);
-    const isSecret = el.type === 'password';
+    const isSecret = isSecretField(el);
     const field = label ? `the **${label}** field` : 'the field';
     const text = isSecret
       ? `Type your password in ${field}`
@@ -229,8 +302,10 @@
     if (run && records.some((r) => r.target !== widget?.host)) run.changed = true;
   });
   function watchPage(on) {
-    if (on) observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-    else observer.disconnect();
+    if (on) {
+      secretRects(); // note the password fields now, before any can be switched to plain text
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    } else observer.disconnect();
     run = null;
     if (held) clearTimeout(held.timer);
     held = null;

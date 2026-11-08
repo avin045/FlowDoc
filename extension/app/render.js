@@ -30,6 +30,13 @@ export function setHighlightStyle(style) {
 
 // ---------- text ----------
 
+// A step's link, if it is one that may be shown and opened: web pages and
+// local files only (never javascript: or data: links, whatever a guide holds).
+export function safeLink(url) {
+  const u = String(url ?? '').trim();
+  return /^(https?|file):/i.test(u) ? u : '';
+}
+
 export function escapeHtml(text) {
   return String(text ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
@@ -90,7 +97,9 @@ export function loadImage(src) {
     img.src = src;
   });
   imageCache.set(src, p);
-  if (imageCache.size > 200) imageCache.delete(imageCache.keys().next().value);
+  p.catch(() => imageCache.delete(src));
+  // Each entry holds a decoded screenshot; keep a few dozen, not a library's worth.
+  if (imageCache.size > 48) imageCache.delete(imageCache.keys().next().value);
   return p;
 }
 
@@ -196,16 +205,59 @@ const renderCache = new Map();
 const editKey = (step, opts) =>
   JSON.stringify([step.screenshot?.length, step.screenshot?.slice(-48), step.highlight, step.redactions, step.crop, step.target, step.click, getHighlightStyle(), opts]);
 
-// Data URL of the finished screenshot, cached by its edit state.
+const RENDER_CACHE_MAX = 40;
+
+// Data URL of the finished screenshot (for exports), cached by its edit state.
+// The cache keeps the most recently used ones only.
 export async function renderStepImage(step, { maxWidth = 1600, quality = 0.9 } = {}) {
   if (!step.screenshot) return null;
   const key = editKey(step, [maxWidth, quality]);
   const cached = renderCache.get(step.id);
-  if (cached?.key === key) return cached.value;
+  if (cached?.key === key) {
+    renderCache.delete(step.id);
+    renderCache.set(step.id, cached);
+    return cached.value;
+  }
   const canvas = await renderStepCanvas(step, { maxWidth });
   const value = { dataUrl: canvas.toDataURL('image/jpeg', quality), width: canvas.width, height: canvas.height };
+  renderCache.delete(step.id);
   renderCache.set(step.id, { key, value });
+  while (renderCache.size > RENDER_CACHE_MAX) renderCache.delete(renderCache.keys().next().value);
   return value;
+}
+
+// The editor shows screenshots from blob: URLs: the browser keeps them
+// compressed and decodes only what is on screen, where a data: URL would sit
+// in memory as a long string for every step. One URL per step of the open
+// guide; releaseStepImages() frees the others.
+const viewUrls = new Map(); // step id -> { key, url, width, height }
+
+export async function stepImageUrl(step, { maxWidth = 1400 } = {}) {
+  if (!step.screenshot) return null;
+  const key = editKey(step, [maxWidth, 'view']);
+  const hit = viewUrls.get(step.id);
+  if (hit?.key === key) return hit;
+  const canvas = await renderStepCanvas(step, { maxWidth });
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+  if (!blob) return null;
+  const value = { key, url: URL.createObjectURL(blob), width: canvas.width, height: canvas.height };
+  const now = viewUrls.get(step.id);
+  if (now?.key === key) {
+    URL.revokeObjectURL(value.url); // rendered twice at once; keep the first
+    return now;
+  }
+  if (now) URL.revokeObjectURL(now.url); // an image already showing stays on screen
+  viewUrls.set(step.id, value);
+  return value;
+}
+
+// Frees the editor images of every step not in `keep` (a Set of step ids).
+export function releaseStepImages(keep = new Set()) {
+  for (const [id, v] of viewUrls) {
+    if (keep.has(id)) continue;
+    URL.revokeObjectURL(v.url);
+    viewUrls.delete(id);
+  }
 }
 
 export async function dataUrlToBytes(dataUrl) {
@@ -223,7 +275,7 @@ export async function buildExportModel(guide, { images = true, maxWidth = 1600 }
   let n = 0;
   const blocks = [];
   for (const step of guide.steps) {
-    const block = { kind: step.kind, text: step.text || '', note: step.note || '', url: step.href || '' };
+    const block = { kind: step.kind, text: step.text || '', note: step.note || '', url: safeLink(step.href) };
     if (isNumbered(step)) {
       block.number = ++n;
       if (images && step.screenshot && !step.hideImage) block.image = await renderStepImage(step, { maxWidth });

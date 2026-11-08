@@ -43,6 +43,19 @@ const DEFAULTS = {
   migrations: {},
 };
 
+// Whether saved keys are protected by the system keychain. On Linux without
+// GNOME Keyring or KWallet, Electron still "encrypts", but with a password
+// built into Chromium ('basic_text'), which protects nothing.
+export function keychainProtected() {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  if (process.platform !== 'linux') return true;
+  try {
+    return safeStorage.getSelectedStorageBackend() !== 'basic_text';
+  } catch {
+    return false;
+  }
+}
+
 export function createSettings(file) {
   let data = null;
   let keys = {}; // provider -> { enc: base64, plain?: true }
@@ -101,7 +114,7 @@ export function createSettings(file) {
         ...structuredClone(data),
         keys: Object.fromEntries([...Object.keys(AI_PROVIDERS), 'notion'].map((p) => [p, !!keys[p]])),
         providers: AI_PROVIDERS,
-        secureStorage: safeStorage.isEncryptionAvailable(),
+        secureStorage: keychainProtected(),
       };
     },
     async get() {

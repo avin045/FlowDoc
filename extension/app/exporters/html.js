@@ -26,7 +26,7 @@ const CSS = `
   @media print { body { background: #fff; } main { padding: 0; max-width: none; } .step, .callout { break-inside: avoid; } img { box-shadow: none; } }
 `;
 
-export function guideToHtml(model, { autoPrint = false } = {}) {
+export function guideToHtml(model) {
   const parts = [];
   for (const b of model.blocks) {
     if (b.kind === 'heading') {
@@ -65,7 +65,6 @@ ${model.description ? `<p class="desc">${escapeHtml(model.description)}</p>` : '
 ${parts.join('\n')}
 <footer>Made with FlowDoc</footer>
 </main>
-${autoPrint ? '<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),300))</script>' : ''}
 </body>
 </html>`;
 }

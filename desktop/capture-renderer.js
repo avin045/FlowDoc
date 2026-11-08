@@ -2,8 +2,18 @@
 // One <video> per display; grabbing draws the current frame to a canvas.
 const streams = new Map(); // displayId -> { video, stream }
 
-window.captureStart = async (sources) => {
+// `replace`: stream exactly these displays, stopping any others.
+window.captureStart = async (sources, { replace = false } = {}) => {
   try {
+    if (replace) {
+      const keep = new Set(sources.map((s) => s.displayId));
+      for (const [id, { stream, video }] of streams) {
+        if (keep.has(id)) continue;
+        stream.getTracks().forEach((t) => t.stop());
+        video.srcObject = null;
+        streams.delete(id);
+      }
+    }
     for (const s of sources) {
       if (!s.sourceId || streams.has(s.displayId)) continue;
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -34,8 +44,13 @@ window.captureStart = async (sources) => {
 
 const canvas = document.createElement('canvas');
 
-const send = (id, c, extra = {}) =>
-  window.flowdocCapture.sendFrame(id, { dataUrl: c.toDataURL('image/jpeg', 0.88), width: c.width, height: c.height, ...extra });
+// Shots are stored as WebP: about a third smaller than JPEG at the same
+// quality for screens full of text and flat colour. JPEG if WebP isn't there.
+function encode(c) {
+  const webp = c.toDataURL('image/webp', 0.86);
+  return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/jpeg', 0.88);
+}
+const send = (id, c, extra = {}) => window.flowdocCapture.sendFrame(id, { dataUrl: encode(c), width: c.width, height: c.height, ...extra });
 
 // Shots that keep the recorder bar out wait here while the bar is hidden from captures.
 const held = new Map(); // id -> { video, c, box, bar }
@@ -65,7 +80,9 @@ function meanDiff(a, b) {
 }
 
 window.flowdocCapture.onGrab(({ id, displayId, patch }) => {
-  const entry = streams.get(displayId) || streams.values().next().value;
+  // A display that isn't streamed (an area capture streams only its own, or
+  // one plugged in since): no frame, so the main process grabs it another way.
+  const entry = streams.get(displayId);
   if (!entry || !entry.video.videoWidth) {
     window.flowdocCapture.sendFrame(id, null);
     return;
@@ -114,4 +131,99 @@ window.flowdocCapture.onPatch(async ({ id }) => {
     return send(id, c, { barHidden: true });
   }
   send(id, c);
+});
+
+// ---------- comparing two shots (recorder.js shotsDiffer, run here) ----------
+
+// Decoded off the main process: a full-screen image takes a while to decode,
+// and the main process handles every window and the input hook meanwhile.
+async function pixelsOf(dataUrl, box) {
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  try {
+    const W = bitmap.width;
+    const H = bitmap.height;
+    const r = box || { x: 0, y: 0, w: 1, h: 1 };
+    const b = { x: Math.round(r.x * W), y: Math.round(r.y * H), width: Math.max(1, Math.round(r.w * W)), height: Math.max(1, Math.round(r.h * H)) };
+    b.width = Math.min(b.width, W - b.x);
+    b.height = Math.min(b.height, H - b.y);
+    if (b.width <= 0 || b.height <= 0) return { W, H, b, data: null };
+    const c = new OffscreenCanvas(b.width, b.height);
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(bitmap, b.x, b.y, b.width, b.height, 0, 0, b.width, b.height);
+    return { W, H, b, data: g.getImageData(0, 0, b.width, b.height).data };
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function differ(a, b, region, masks = []) {
+  const [pa, pb] = await Promise.all([pixelsOf(a, region), pixelsOf(b, region)]);
+  if (!pa.W || !pa.H || pa.W !== pb.W || pa.H !== pb.H || !pa.data || !pb.data) return true;
+  const { W, H, b: box } = pa;
+  const skip = masks.map((m) => ({ x1: m.x * W - box.x, y1: m.y * H - box.y, x2: (m.x + m.w) * W - box.x, y2: (m.y + m.h) * H - box.y }));
+  const A = pa.data;
+  const B = pb.data;
+  let changed = 0;
+  for (let y = 0; y < box.height; y++) {
+    for (let x = 0; x < box.width; x++) {
+      const i = (y * box.width + x) * 4;
+      if (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]) <= 48) continue;
+      if (skip.some((m) => x >= m.x1 && x < m.x2 && y >= m.y1 && y < m.y2)) continue;
+      if (++changed > 40) return true;
+    }
+  }
+  return false;
+}
+
+window.flowdocCapture.onDiff(({ id, a, b, region, masks }) => {
+  differ(a, b, region, masks).then(
+    (result) => window.flowdocCapture.sendDiff(id, result),
+    () => window.flowdocCapture.sendDiff(id, null),
+  );
+});
+
+// ---------- password fields ----------
+
+// Covers password fields in a screenshot (recorder.js hideSecrets) with the
+// colour just outside each box's corners (the page around the field) and a
+// thin outline. Nothing inside the box is used, so no character, dot or
+// length of the password survives.
+function coverBox(g, b) {
+  const W = g.canvas.width;
+  const H = g.canvas.height;
+  const at = (x, y) => g.getImageData(Math.min(W - 1, Math.max(0, x)), Math.min(H - 1, Math.max(0, y)), 1, 1).data;
+  const corners = [at(b.x, b.y), at(b.x + b.w - 1, b.y), at(b.x, b.y + b.h - 1), at(b.x + b.w - 1, b.y + b.h - 1)];
+  const rgb = [0, 1, 2].map((i) => Math.round(corners.reduce((sum, c) => sum + c[i], 0) / corners.length));
+  g.fillStyle = 'rgb(' + rgb.join(',') + ')';
+  g.fillRect(b.x, b.y, b.w, b.h);
+  const line = Math.max(1, Math.round(b.h / 30));
+  g.strokeStyle = 'rgba(100, 116, 139, 0.8)';
+  g.lineWidth = line;
+  g.strokeRect(b.x + line * 2, b.y + line * 2, b.w - line * 4, b.h - line * 4);
+}
+
+async function coverBoxes(dataUrl, boxes) {
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const c = document.createElement('canvas');
+  c.width = bitmap.width;
+  c.height = bitmap.height;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  for (const f of boxes.slice(0, 20)) {
+    if (![f?.x, f?.y, f?.w, f?.h].every(Number.isFinite)) continue;
+    const x = Math.max(0, Math.floor(f.x * c.width));
+    const y = Math.max(0, Math.floor(f.y * c.height));
+    const w = Math.min(c.width - x, Math.ceil(f.w * c.width));
+    const h = Math.min(c.height - y, Math.ceil(f.h * c.height));
+    if (w > 0 && h > 0) coverBox(g, { x, y, w, h });
+  }
+  return encode(c);
+}
+
+window.flowdocCapture.onRedact(({ id, dataUrl, boxes }) => {
+  coverBoxes(dataUrl, boxes).then(
+    (out) => window.flowdocCapture.sendRedacted(id, out),
+    () => window.flowdocCapture.sendRedacted(id, null),
+  );
 });

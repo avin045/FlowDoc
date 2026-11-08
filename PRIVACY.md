@@ -68,7 +68,7 @@ When you export a guide (PDF, Word, HTML, Markdown or JSON), the file is created
 | Permission | Why FlowDoc needs it |
 | --- | --- |
 | `activeTab`, `<all_urls>` | Take a screenshot of each step and run the recorder on the site you choose to record |
-| `scripting` | Start the recorder in a tab that was already open when you start recording |
+| `scripting` | Start the recorder only while you record: in the tab you record, in tabs you switch to, and in pages that load meanwhile. Outside a recording, FlowDoc runs no code in any web page |
 | `tabs`, `webNavigation` | Write "Navigate to" steps and follow the recording when you switch tabs |
 | `storage`, `unlimitedStorage` | Keep your guides and screenshots on your computer |
 

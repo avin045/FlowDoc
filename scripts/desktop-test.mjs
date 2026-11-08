@@ -190,9 +190,21 @@ const focusNote = r.checks.demoFocused ? '' : 'another window kept keyboard focu
 check(texts.some((t) => t === 'Type "alex@northwind.example" in the **Email** field'), 'typed text captured with field label', focusNote);
 check(texts.some((t) => t === 'Type your password in the **Password** field'), 'password masked', focusNote);
 check(!r.rawContainsPassword, 'password never stored');
+{
+  const ps = r.passwordShots || {};
+  check(ps.secretSteps?.length >= 1 && ps.secretSteps.every((t) => t === 'Type your password in the **Password** field'), 'typing after "Show password" is still a masked password step', JSON.stringify(ps.secretSteps));
+  check(ps.signIn?.length >= 3 && ps.signIn.every((st) => st.secretsHidden >= 1), 'every screenshot of the sign-in page hides the password field', JSON.stringify(ps.signIn));
+  check(ps.flat && ps.flat.runs <= 3, 'the stored screenshot has the revealed password covered (no readable characters)', JSON.stringify(ps.flat));
+}
 check(texts.some((t) => /Remember me/.test(t)), 'checkbox click captured');
 check(texts.some((t) => /Sign in/.test(t)), 'button click captured');
 check(texts.some((t) => t.startsWith('Double-click')), 'double-click merged into one step');
+{
+  const d = r.doubleClick || {};
+  const added = { steps: d.after?.steps - d.before?.steps, shots: d.after?.shots - d.before?.shots, files: d.after?.files - d.before?.files };
+  check(added.steps === 1 && d.after?.last?.action === 'dblclick' && /^Double-click/.test(d.after.last.text), 'a double-click adds exactly one step (no separate click step)', JSON.stringify({ added, last: d.after?.last?.text }));
+  check(added.shots === 1 && !!d.after?.last?.screenshot && added.files <= 1, 'the second press of a double-click takes no screenshot of its own', JSON.stringify(added));
+}
 check(texts.some((t) => t.startsWith('Right-click')), 'right-click captured');
 check(texts.some((t) => t === 'Press **Enter**'), 'Enter key captured');
 check(texts.some((t) => t === 'Press **Ctrl+S**'), 'keyboard shortcut captured');
@@ -439,6 +451,19 @@ check(side.sizes?.length === 1, 'the dialog keeps the same size for every sectio
 check(JSON.stringify(side.keys) === '["capture","storage","capture","integrations","general","integrations","general"]', 'Up/Down move through the sections (wrapping), Home/End jump to the first/last', JSON.stringify(side.keys));
 check(JSON.stringify(sb.storage) === '["storage"]', 'clicking a section shows only that section', JSON.stringify(sb.storage));
 check(sb.reopened === 'storage' && JSON.stringify(sb.reopenedVisible) === '["storage"]' && sb.focused === 'storage', 'Settings reopens on the section used last, with keyboard focus on it', `${sb.reopened} ${JSON.stringify(sb.reopenedVisible)} focus=${sb.focused}`);
+
+console.log('\nStorage and security');
+const sec = r.security || {};
+const sto = sec.storage || {};
+check(!sto.inlineImages && sto.refs > 0 && sto.filesExist, 'screenshots are saved as image files, not inside the guide file', JSON.stringify(sto));
+check(sto.webp > 0, 'captured screenshots are WebP', `${sto.webp}/${sto.refs}`);
+check(!sto.indexInlineImages, 'the guide list keeps thumbnails as files too');
+check(sec.editorImage?.blob && sec.editorImage.width > 0, 'the editor shows screenshots from the stored files', JSON.stringify(sec.editorImage));
+check(sec.inlineScriptBlocked === true, 'markup injected into the workspace cannot run script (CSP)');
+check(sec.import && sec.import.id === null && sec.import.kind === 'manual' && sec.import.href === null && sec.import.screenshot === null, 'an imported guide file is cleaned of markup, script links and remote images', JSON.stringify(sec.import));
+check(sec.navigationBlocked === true, 'the workspace window cannot be navigated away from FlowDoc');
+check(sec.geolocation === 'denied', 'permissions FlowDoc does not use are refused', sec.geolocation);
+check(sec.notifications === 'granted', 'notifications stay allowed for finished AI work', sec.notifications);
 
 console.log('\nRename + exports');
 check(r.legacyGuide === 'A guide made in StepCraft', 'guides from StepCraft carried over to FlowDoc');

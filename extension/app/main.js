@@ -15,7 +15,7 @@ import { aiEnabled, cleanError, openImproveDialog, openNeedsAiDialog, openSettin
 import { languageLabel } from './languages.js';
 import { exportGuide, FORMATS, guideToClipboardMarkdown, guideToPlainText, parseImport, printGuide } from './exporters/index.js';
 import { openImageEditor } from './imageEditor.js';
-import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, renderStepCanvas, renderStepImage, richToHtml } from './render.js';
+import { download, escapeHtml, formatDate, getHighlightStyle, htmlToRich, isNumbered, releaseStepImages, renderStepCanvas, richToHtml, safeLink, stepImageUrl } from './render.js';
 import { openNotionDialog } from './notion.js';
 import { makeSampleGuide } from './sample.js';
 
@@ -184,6 +184,7 @@ window.addEventListener('hashchange', route);
 
 async function renderHome() {
   current = null;
+  releaseStepImages();
   document.title = 'FlowDoc — Guides';
   renderSidebar(null);
   const guides = await listGuides();
@@ -253,7 +254,7 @@ async function renderHome() {
     const q = query.trim().toLowerCase();
     grid.replaceChildren();
     for (const g of guides.filter((x) => !q || (x.title || '').toLowerCase().includes(q))) {
-      const card = h(`<a class="card" href="#/guide/${g.id}">
+      const card = h(`<a class="card" href="#/guide/${escapeHtml(g.id)}">
         <div class="thumb">${g.thumb ? '' : I.image}</div>
         <div class="card-body">
           <p class="card-title"></p>
@@ -294,7 +295,7 @@ async function backfillThumbs(guides) {
 
 async function updateThumb(guide) {
   const first = guide.steps.find((s) => isNumbered(s) && s.screenshot && !s.hideImage);
-  const key = first ? `${first.id}|${first.screenshot.length}|${JSON.stringify([first.redactions, first.crop, first.highlight, getHighlightStyle()])}` : '';
+  const key = first ? `${first.id}|${first.screenshot.length}|${first.screenshot.slice(-48)}|${JSON.stringify([first.redactions, first.crop, first.highlight, getHighlightStyle()])}` : '';
   if (key === (guide.thumbKey || '') && (guide.thumb || !first)) return false;
   guide.thumbKey = key;
   guide.thumb = first ? (await renderStepCanvas(first, { maxWidth: 480 })).toDataURL('image/jpeg', 0.75) : null;
@@ -667,6 +668,7 @@ async function renderEditor(id) {
     redoStack = [];
   }
   current = guide;
+  releaseStepImages(new Set(guide.steps.map((st) => st.id)));
   document.title = `${guide.title || 'Untitled guide'} — FlowDoc`;
   renderSidebar(id);
   const ro = !!guide.recording;
@@ -1087,7 +1089,7 @@ function renderOutline(numbers) {
     $('.t', a).textContent = (s.text || '').replace(/\*\*/g, '') || 'Untitled step';
     $('a', a).addEventListener('click', (e) => {
       e.preventDefault();
-      view.querySelector(`[data-id="${s.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      view.querySelector(`[data-id="${CSS.escape(s.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
     ol.append(a);
   }
@@ -1120,7 +1122,7 @@ const insertItems = (index) => [
 function insertBlock(index, kind) {
   const step = { id: newId('s'), kind, text: '' };
   mutate(() => current.steps.splice(index, 0, step));
-  const el = view.querySelector(`[data-id="${step.id}"] .b-text`);
+  const el = view.querySelector(`[data-id="${CSS.escape(step.id)}"] .b-text`);
   el?.focus();
   el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
@@ -1134,9 +1136,43 @@ const PLACEHOLDER = {
   text: 'Write some text…',
 };
 
+const KINDS = new Set(['action', 'manual', 'tip', 'alert', 'heading', 'text']);
+
+// Runs `fn` once `el` is within about two screens of the visible part of the page.
+const nearScreen = new Map(); // element -> callback
+let nearObserver = null;
+function whenNearScreen(el, fn) {
+  if (!('IntersectionObserver' in window)) return void fn();
+  nearObserver ||= new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const run = nearScreen.get(e.target);
+        nearObserver.unobserve(e.target);
+        nearScreen.delete(e.target);
+        run?.();
+      }
+    },
+    { rootMargin: '1600px 0px' },
+  );
+  nearScreen.set(el, fn);
+  nearObserver.observe(el);
+  // Blocks replaced before they came near the screen are let go.
+  clearTimeout(pruneTimer);
+  pruneTimer = setTimeout(() => {
+    for (const target of nearScreen.keys()) {
+      if (target.isConnected) continue;
+      nearObserver.unobserve(target);
+      nearScreen.delete(target);
+    }
+  }, 1000);
+}
+let pruneTimer = 0;
+
 function blockEl(step, index, number, ro) {
-  const kind = step.kind || 'action';
-  const el = h(`<li class="block kind-${kind}" data-id="${step.id}">
+  // Guides can come from imported files: only known kinds reach the markup.
+  const kind = KINDS.has(step.kind) ? step.kind : step.kind ? 'manual' : 'action';
+  const el = h(`<li class="block kind-${kind}" data-id="${escapeHtml(step.id)}">
     <div class="gutter"></div>
     <div class="b-body"></div>
   </li>`);
@@ -1165,9 +1201,9 @@ function blockEl(step, index, number, ro) {
     if (!ro) wireEditable(note, step, 'note', { rich: true });
     body.append(note);
 
-    if (step.href && step.action === 'navigate') {
-      const a = h('<a class="b-url" target="_blank" rel="noopener"></a>');
-      a.href = step.href;
+    if (safeLink(step.href) && step.action === 'navigate') {
+      const a = h('<a class="b-url" target="_blank" rel="noopener noreferrer"></a>');
+      a.href = safeLink(step.href);
       a.textContent = step.href;
       body.append(a);
     }
@@ -1191,16 +1227,19 @@ function blockEl(step, index, number, ro) {
           <button data-shot="hide" aria-label="Hide screenshot" title="Hide screenshot">${I.eyeOff}</button>
         </div></div>`);
       if (ro) $('.shot-tools', shot).remove();
-      renderStepImage(step, { maxWidth: 1400 }).then((img) => {
-        if (!img) return;
-        const image = new Image();
-        image.src = img.dataUrl;
-        image.width = img.width;
-        image.height = img.height;
-        image.alt = `Screenshot for step ${number}`;
-        image.decoding = 'async';
-        $('.placeholder', shot)?.replaceWith(image);
-      });
+      // Rendered when it comes near the screen, not all at once.
+      whenNearScreen(shot, () =>
+        stepImageUrl(step, { maxWidth: 1400 }).then((img) => {
+          if (!img) return;
+          const image = new Image();
+          image.src = img.url;
+          image.width = img.width;
+          image.height = img.height;
+          image.alt = `Screenshot for step ${number}`;
+          image.decoding = 'async';
+          $('.placeholder', shot)?.replaceWith(image);
+        }),
+      );
       if (!ro) {
         $('[data-shot="edit"]', shot).addEventListener('click', () =>
           openImageEditor(step, { onSave: (edits) => mutate(() => Object.assign(step, edits)) }),
@@ -1252,7 +1291,7 @@ function blockTools(step, index) {
           else {
             step.showNote = true;
             renderBlocks();
-            view.querySelector(`[data-id="${step.id}"] .b-note`)?.focus();
+            view.querySelector(`[data-id="${CSS.escape(step.id)}"] .b-note`)?.focus();
           }
         },
       });

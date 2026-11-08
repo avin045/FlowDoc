@@ -77,6 +77,92 @@ async function ensureContentScript(tabId) {
   }
 }
 
+// The recorder script runs only while a capture is on: registered for pages
+// that load meanwhile, and put into a tab when it's switched to. Outside a
+// capture no page runs any FlowDoc code.
+const RECORDER_SCRIPT = 'flowdoc-recorder';
+async function registerRecorder() {
+  try {
+    const found = await chrome.scripting.getRegisteredContentScripts({ ids: [RECORDER_SCRIPT] });
+    if (found.length) return;
+    await chrome.scripting.registerContentScripts([
+      { id: RECORDER_SCRIPT, matches: ['<all_urls>'], js: ['content.js'], runAt: 'document_idle', allFrames: false, persistAcrossSessions: false },
+    ]);
+  } catch (err) {
+    console.warn('[FlowDoc] could not register the recorder script:', err?.message || err);
+  }
+}
+async function unregisterRecorder() {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [RECORDER_SCRIPT] });
+  } catch {
+    // not registered
+  }
+}
+
+// ---------- password fields ----------
+
+// Covers a box with the colour just outside its corners (the page around the
+// field), with a thin outline so a reader still sees a field there. Nothing
+// inside the box is used, so nothing about the password (characters, dots,
+// how many) survives.
+function coverBox(g, b) {
+  const W = g.canvas.width;
+  const H = g.canvas.height;
+  const at = (x, y) => g.getImageData(Math.min(W - 1, Math.max(0, x)), Math.min(H - 1, Math.max(0, y)), 1, 1).data;
+  const corners = [at(b.x, b.y), at(b.x + b.w - 1, b.y), at(b.x, b.y + b.h - 1), at(b.x + b.w - 1, b.y + b.h - 1)];
+  const rgb = [0, 1, 2].map((i) => Math.round(corners.reduce((sum, c) => sum + c[i], 0) / corners.length));
+  g.fillStyle = `rgb(${rgb.join(",")})`;
+  g.fillRect(b.x, b.y, b.w, b.h);
+  const line = Math.max(1, Math.round(b.h / 30));
+  g.strokeStyle = 'rgba(100, 116, 139, 0.8)';
+  g.lineWidth = line;
+  g.strokeRect(b.x + line * 2, b.y + line * 2, b.w - line * 4, b.h - line * 4);
+}
+
+// The password-field boxes a page reported (viewport CSS pixels), as image
+// pixels. Only well-formed boxes, at most 20: the message comes from a web
+// page's tab, so it is checked like any input.
+function secretBoxes(rects, viewport, shot) {
+  if (!Array.isArray(rects) || !shot?.width) return [];
+  const vw = Number(viewport?.w);
+  const k = shot.width / (vw > 0 ? vw : shot.width);
+  const ok = (n) => typeof n === 'number' && Number.isFinite(n);
+  return rects
+    .slice(0, 20)
+    .filter((r) => r && ok(r.x) && ok(r.y) && ok(r.w) && ok(r.h) && r.w > 0 && r.h > 0)
+    .map((r) => {
+      const x = Math.max(0, Math.floor(r.x * k));
+      const y = Math.max(0, Math.floor(r.y * k));
+      return { x, y, w: Math.min(shot.width - x, Math.ceil(r.w * k)), h: Math.min(shot.height - y, Math.ceil(r.h * k)) };
+    })
+    .filter((b) => b.w > 0 && b.h > 0);
+}
+
+// Covers the password fields in the screenshot itself, before anything is
+// stored: the original pixels never reach the guide. If that fails, the step
+// gets no screenshot at all rather than one showing a password.
+async function hideSecrets(shot, rects, viewport) {
+  if (!shot?.dataUrl) return shot;
+  const boxes = secretBoxes(rects, viewport, shot);
+  if (!boxes.length) return shot;
+  try {
+    const img = await createImageBitmap(await (await fetch(shot.dataUrl)).blob());
+    const c = new OffscreenCanvas(img.width, img.height);
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    img.close();
+    for (const b of boxes) coverBox(g, b);
+    const bytes = new Uint8Array(await (await c.convertToBlob({ type: 'image/jpeg', quality: 0.88 })).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { ...shot, dataUrl: `data:image/jpeg;base64,${btoa(bin)}`, secretsHidden: boxes.length };
+  } catch (err) {
+    console.warn('[FlowDoc] could not hide password fields; the step is kept without its screenshot:', err?.message || err);
+    return null;
+  }
+}
+
 // ---------- steps ----------
 
 function buildStep(raw, shot, page) {
@@ -90,6 +176,7 @@ function buildStep(raw, shot, page) {
     url: page?.url || raw.url || '',
     pageTitle: page?.title || raw.pageTitle || '',
     screenshot: shot?.dataUrl || null,
+    ...(shot?.secretsHidden ? { secretsHidden: shot.secretsHidden } : {}),
     shot: shot
       ? {
           width: shot.width,
@@ -212,7 +299,7 @@ async function addSteps(rawSteps, opts) {
 async function addStepsInTurn(rawSteps, { windowId, page, capture: wantCapture = true, settle = null }, prior) {
   const state = await getState();
   if (!state.active || state.paused) return state;
-  const shot = wantCapture ? await capture(windowId) : null;
+  const shot = wantCapture ? await hideSecrets(await capture(windowId), page?.secrets, page?.viewport) : null;
   const holding = rawSteps.some((r) => r.hold) && (await ignoringRepeats());
   await prior;
   return enqueue(async () => {
@@ -296,6 +383,7 @@ async function start(tabId, { guideId } = {}) {
       { windowId: tab.windowId, page: { url: tab.url, title: tab.title } },
     );
   }
+  await registerRecorder();
   await ensureContentScript(tabId);
   return setState({ ...(await getState()) });
 }
@@ -312,6 +400,7 @@ async function stop({ open = true } = {}) {
     await saveGuide(guide);
   });
   await setState(IDLE);
+  await unregisterRecorder();
   if (open) await chrome.tabs.create({ url: chrome.runtime.getURL(`app.html#/guide/${state.guideId}`) });
   return { ...IDLE, lastGuideId: state.guideId };
 }
@@ -331,7 +420,9 @@ async function discard() {
     delete guide.recording;
     await saveGuide(guide);
   });
-  return setState(IDLE);
+  const idle = await setState(IDLE);
+  await unregisterRecorder();
+  return idle;
 }
 
 async function setPaused(paused) {
@@ -427,7 +518,10 @@ async function tabSwitched(tabId) {
   if (!/^(https?|file):/.test(tab?.pendingUrl || tab?.url || '')) return;
   if (tab.status === 'loading') tab = await loadedTab(tabId);
   const state = await getState();
-  if (!state.active || state.paused || !tab?.active || !/^(https?|file):/.test(tab.url || '')) return;
+  if (!state.active || !tab?.active || !/^(https?|file):/.test(tab.url || '')) return;
+  // A tab that was open before the capture began doesn't have the recorder yet.
+  await ensureContentScript(tab.id);
+  if (state.paused) return;
   const guide = await getGuide(state.guideId);
   if (guide?.steps.findLast((s) => s.url)?.url === tab.url) return;
   await new Promise((r) => setTimeout(r, 300)); // let the tab paint before the screenshot
@@ -448,4 +542,10 @@ chrome.runtime.onStartup.addListener(async () => {
   // A browser restart ends any recording that was in progress.
   const state = await getState();
   if (state.active) await stop({ open: false });
+});
+
+// After an update or reload: the recorder script belongs to a capture in progress only.
+chrome.runtime.onInstalled.addListener(async () => {
+  if ((await getState()).active) await registerRecorder();
+  else await unregisterRecorder();
 });

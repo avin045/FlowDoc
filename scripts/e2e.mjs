@@ -376,6 +376,123 @@ try {
   check(howMany(repOff, /Refresh/) === 2, 'with the setting off, every click is a step again', repOff.join(' / '));
   await control.evaluate(() => chrome.storage.local.remove('flowdoc_capture'));
 
+  // A double-click is one step whose screenshot is taken at the first press;
+  // the second press takes none. Screenshots are counted where they are taken.
+  {
+    await worker.evaluate(() => {
+      self.__flowdocShots = 0;
+      if (!self.__flowdocCapture) {
+        self.__flowdocCapture = chrome.tabs.captureVisibleTab.bind(chrome.tabs);
+        chrome.tabs.captureVisibleTab = (...args) => {
+          self.__flowdocShots++;
+          return self.__flowdocCapture(...args);
+        };
+      }
+    });
+    const id = (await send({ type: 'start', tabId })).guideId;
+    await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+    await page.waitForTimeout(1200);
+    const stepsOf = async () => (await control.evaluate(async (gid) => (await import('/shared/guides.js')).getGuide(gid), id)).steps;
+    const before = await stepsOf();
+    const shotsBefore = await worker.evaluate(() => self.__flowdocShots);
+    await page.dblclick('#count');
+    await page.waitForTimeout(2200);
+    const after = await stepsOf();
+    const shots = (await worker.evaluate(() => self.__flowdocShots)) - shotsBefore;
+    const added = after.slice(before.length);
+    const done = context.waitForEvent('page');
+    await send({ type: 'stop' });
+    await (await done).close();
+    await control.evaluate(async (gid) => (await import('/shared/guides.js')).deleteGuide(gid), id);
+    const summary = JSON.stringify({ added: added.map((st) => `${st.action}: ${st.text}${st.screenshot ? ' [shot]' : ''}`), shots });
+    check(added.length === 1 && added[0].action === 'dblclick' && /^Double-click \*\*Add one/.test(added[0].text), 'a double-click adds exactly one step (no separate click step)', summary);
+    check(!!added[0]?.screenshot && shots === 1, 'the second press of a double-click takes no screenshot of its own', summary);
+  }
+
+  // Password fields are never readable in a screenshot, not even as dots, and
+  // not after "Show password" turns the field into plain text.
+  {
+    console.log('\nPassword fields');
+    await page.goto(`http://localhost:${PORT}/demo/`);
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.id = 'reveal';
+      b.textContent = 'Show password';
+      b.addEventListener('click', () => (document.getElementById('password').type = 'text'));
+      document.getElementById('password').after(b);
+      // A plain text field that is a secret by its label, and a password
+      // field inside a web component (shadow DOM).
+      const label = document.createElement('label');
+      label.htmlFor = 'pin';
+      label.textContent = 'PIN';
+      const pin = document.createElement('input');
+      pin.id = 'pin';
+      pin.type = 'text';
+      const host = document.createElement('div');
+      host.id = 'shadow-login';
+      host.attachShadow({ mode: 'open' }).innerHTML = '<input type="password" value="inshadow1" style="display:block;width:260px;height:36px">';
+      b.after(label, pin, host);
+    });
+    const id = (await send({ type: 'start', tabId })).guideId;
+    await page.waitForSelector('flowdoc-recorder', { state: 'attached' });
+    await page.waitForTimeout(600);
+    await page.click('#password');
+    await page.keyboard.type('s3cretpw', { delay: 20 });
+    await page.waitForTimeout(1600);
+    await page.click('#reveal');
+    await page.waitForTimeout(900);
+    await page.click('#password');
+    await page.keyboard.type('77', { delay: 20 });
+    await page.waitForTimeout(1600);
+    await page.click('#pin');
+    await page.keyboard.type('4321', { delay: 20 });
+    await page.waitForTimeout(1600);
+    await page.click('#email');
+    await page.waitForTimeout(1200);
+    const g = await control.evaluate(async (gid) => (await import('/shared/guides.js')).getGuide(gid), id);
+    const done = context.waitForEvent('page');
+    await send({ type: 'stop' });
+    await (await done).close();
+    await control.evaluate(async (gid) => (await import('/shared/guides.js')).deleteGuide(gid), id);
+    const list = g.steps.map((st) => `${st.action}: ${st.text}${st.screenshot ? ` [hidden ${st.secretsHidden || 0}]` : ''}`);
+    const typed = g.steps.filter((st) => st.action === 'type' && /\*\*Password\*\*/.test(st.text));
+    check(!JSON.stringify(g).includes('s3cretpw') && typed.length >= 1 && typed.every((st) => st.secret && st.text === 'Type your password in the **Password** field'), 'typing after "Show password" is still a masked password step', list.join(' / '));
+    const pinStep = g.steps.find((st) => st.action === 'type' && /PIN/.test(st.text));
+    check(!JSON.stringify(g).includes('4321') && pinStep?.secret && pinStep.value === '', 'a text field labelled "PIN" is treated as a password', pinStep?.text);
+    const shots = g.steps.filter((st) => st.action !== 'navigate' && st.screenshot);
+    check(shots.length >= 4 && shots.every((st) => st.secretsHidden >= 1), 'every screenshot hides the password field', list.join(' / '));
+    check(shots.at(-1)?.secretsHidden >= 3, 'the PIN field and a password field inside a web component are covered too', list.at(-1));
+    const field = typed.at(-1)?.target;
+    const last = shots.at(-1);
+    const flat =
+      field &&
+      last &&
+      (await app.evaluate(
+        async ({ src, t, vw }) => {
+          const img = new Image();
+          img.src = src;
+          await img.decode();
+          const k = img.naturalWidth / vw;
+          const box = { x: Math.round(t.x * k) + 6, y: Math.round(t.y * k), w: Math.round(t.w * k) - 12, h: Math.round(t.h * k) };
+          const c = document.createElement('canvas');
+          c.width = box.w;
+          c.height = box.h;
+          const g2 = c.getContext('2d');
+          g2.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+          const d = g2.getImageData(0, Math.floor(box.h / 2), box.w, 1).data;
+          let runs = 1;
+          for (let x = 1; x < box.w; x++) {
+            const i = x * 4;
+            if (Math.abs(d[i] - d[i - 4]) + Math.abs(d[i + 1] - d[i - 3]) + Math.abs(d[i + 2] - d[i - 2]) > 30) runs++;
+          }
+          return { runs, maxRuns: Math.ceil(box.w / Math.max(16, box.h)) + 3 };
+        },
+        { src: last.screenshot, t: field, vw: last.shot.viewportW },
+      ));
+    check(!!flat && flat.runs <= 3, 'the stored screenshot has the revealed password covered (no readable characters)', JSON.stringify(flat));
+  }
+
   // ---------- copy menu ----------
   console.log('\nCopy as text or Markdown');
   await app.bringToFront();

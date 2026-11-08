@@ -4,7 +4,7 @@
 // the user's mouse), exercises AI enhancement against a mock server, runs the
 // exporters inside the workspace, and writes results.json for the runner.
 import { BrowserWindow, desktopCapturer, nativeImage, nativeTheme, screen } from 'electron';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +25,19 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   mkdirSync(out, { recursive: true });
   const results = { checks: {}, notes: [] };
   const shot = async (win, name) => writeFileSync(join(out, name), (await win.webContents.capturePage()).toPNG());
+  // Screenshots are WebP, and saved ones are app:// files: nativeImage reads
+  // neither, so the workspace window decodes them into a PNG first.
+  const decodeShot = async (src) =>
+    nativeImage.createFromDataURL(
+      await mainWin.webContents.executeJavaScript(`(async (src) => {
+        const b = await createImageBitmap(await (await fetch(src)).blob());
+        const c = document.createElement('canvas');
+        c.width = b.width;
+        c.height = b.height;
+        c.getContext('2d').drawImage(b, 0, 0);
+        return c.toDataURL('image/png');
+      })(${JSON.stringify(src)})`),
+    );
 
   // Exports from the workspace go straight to the output folder.
   mainWin.webContents.session.on('will-download', (_e, item) => item.setSavePath(join(out, item.getFilename())));
@@ -154,6 +167,20 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   await click('#password');
   await type('hunter22');
   await sleep(2600);
+  // "Show password" turns the field into plain text: it stays a password
+  // field, in the step text and in every screenshot.
+  await demo.webContents.executeJavaScript(`(() => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'reveal';
+    b.textContent = 'Show password';
+    b.addEventListener('click', () => (document.getElementById('password').type = 'text'));
+    document.getElementById('password').after(b);
+  })()`);
+  await click('#reveal');
+  await click('#password');
+  await type('x9');
+  await sleep(2600);
   await click('#remember');
   const navigated = new Promise((r) => demo.webContents.once('did-finish-load', r));
   await click('button[type=submit]');
@@ -167,8 +194,25 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
   await type('Printer offline');
   key(K.Enter);
   await sleep(900);
+  // A double-click is one step with one screenshot, the one taken at its first
+  // press: the second press only relabels that step.
+  const libraryDir = (await mainWin.webContents.executeJavaScript('window.flowdocDesktop.storage.get()')).dir;
+  const shotState = async () => {
+    const g = await getGuide(recorder.state.guideId);
+    const last = g.steps.at(-1);
+    return {
+      steps: g.steps.length,
+      shots: g.steps.filter((st) => st.screenshot).length,
+      files: readdirSync(join(libraryDir, 'assets')).length,
+      last: { action: last?.action, text: last?.text, screenshot: last?.screenshot || null },
+    };
+  };
+  await recorder.drain();
+  const dblBefore = await shotState();
   await click('h1', { clicks: 1 });
   await click('h1', { clicks: 2 });
+  await recorder.drain();
+  results.doubleClick = { before: dblBefore, after: await shotState() };
   await click('#details', { button: 2 });
   key(K.S, { ctrlKey: true });
   await sleep(1200);
@@ -206,6 +250,35 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     })),
   };
   results.rawContainsPassword = JSON.stringify(guide).includes('hunter22');
+  // Password fields in screenshots: every shot of the sign-in page from the
+  // first password on hides the field, and the stored pixels where it is are
+  // flat blocks, not dots or characters.
+  {
+    const steps = guide.steps;
+    const first = steps.findIndex((st) => st.secret);
+    const signIn = first < 0 ? [] : steps.filter((st, i) => i >= first && st.window === steps[first].window && st.screenshot);
+    const pw = steps.filter((st) => st.secret).at(-1);
+    let flat = null;
+    if (pw?.screenshot && pw.target && pw.shot?.viewportW) {
+      const img = await decodeShot(pw.screenshot);
+      const k = img.getSize().width / pw.shot.viewportW;
+      const box = { x: Math.round(pw.target.x * k) + 6, y: Math.round(pw.target.y * k), width: Math.round(pw.target.w * k) - 12, height: Math.round(pw.target.h * k) };
+      const px = img.crop(box).toBitmap();
+      const row = Math.floor(box.height / 2);
+      let runs = 1;
+      for (let x = 1; x < box.width; x++) {
+        const i = (row * box.width + x) * 4;
+        if (Math.abs(px[i] - px[i - 4]) + Math.abs(px[i + 1] - px[i - 3]) + Math.abs(px[i + 2] - px[i - 2]) > 30) runs++;
+      }
+      writeFileSync(join(out, 'password-field.png'), img.crop(box).toPNG());
+      flat = { runs, maxRuns: Math.ceil(box.width / Math.max(16, box.height)) + 3 };
+    }
+    results.passwordShots = {
+      secretSteps: steps.filter((st) => st.secret).map((st) => st.text),
+      signIn: signIn.map((st) => ({ text: st.text, secretsHidden: st.secretsHidden || 0 })),
+      flat,
+    };
+  }
 
   // ---------- continue capturing ----------
   // The editor's "Continue capturing" adds new steps after the last one and
@@ -479,7 +552,7 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     const unseen = await barPixels('hidden');
     applyBarProtection(false);
     bv.screenGrab = seen && unseen ? { meanDiff: meanDiff(seen, unseen) } : { error: 'no screen source' };
-    const ours = last?.screenshot ? barSpot(nativeImage.createFromDataURL(last.screenshot), 'own-shot') : null;
+    const ours = last?.screenshot ? barSpot(await decodeShot(last.screenshot), 'own-shot') : null;
     bv.ownShot = { barHidden: !!ours, toHidden: meanDiff(ours, unseen), toVisible: meanDiff(ours, seen) };
     // Shots that overlap (a click's shot while a held repeated click is being
     // judged): one shot showing the bar again must not let it into another.
@@ -491,11 +564,13 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     const shots = await Promise.all(
       Array.from({ length: 10 }, (_, i) => sleep(i * 30).then(() => recorder.simulate.shot({ x: b.x + b.width / 2, y: b.y + b.height / 2 }))),
     );
-    bv.overlap = shots.map((f, i) => {
-      if (!f?.dataUrl) return { i, error: 'no shot' };
-      const spot = barSpot(nativeImage.createFromDataURL(f.dataUrl), `overlap-${i}`);
-      return { i, barHidden: !!f.barHidden, toHidden: meanDiff(spot, unseen), toVisible: meanDiff(spot, seen) };
-    });
+    bv.overlap = await Promise.all(
+      shots.map(async (f, i) => {
+        if (!f?.dataUrl) return { i, error: 'no shot' };
+        const spot = barSpot(await decodeShot(f.dataUrl), `overlap-${i}`);
+        return { i, barHidden: !!f.barHidden, toHidden: meanDiff(spot, unseen), toVisible: meanDiff(spot, seen) };
+      }),
+    );
     await recorder.discard();
     bv.discarded = !(await getGuide(started.guideId));
     bv.restoreBox = await toggle();
@@ -1169,6 +1244,51 @@ export async function runSelfTest({ app, mainWin, recorder, startRecording, sett
     await js(`document.querySelector('dialog [data-close]').click()`);
     await sleep(300);
     results.settingsSidebar = sb;
+  }
+
+  progress('security and storage');
+  // ---------- screenshots stored as files; the workspace locked down ----------
+  {
+    const sec = {};
+    await sleep(600); // the guide list is written shortly after it changes
+    const { dir } = await js(`window.flowdocDesktop.storage.get()`);
+    const text = readFileSync(join(dir, `guide_${guideId}.json`), 'utf8');
+    const refs = [...text.matchAll(/assets\/([0-9a-f]{40}\.(?:webp|jpg|png))/g)].map((m) => m[1]);
+    sec.storage = {
+      inlineImages: text.includes('data:image/'),
+      refs: refs.length,
+      filesExist: refs.length > 0 && refs.every((n) => existsSync(join(dir, 'assets', n))),
+      webp: refs.filter((n) => n.endsWith('.webp')).length,
+      guideKB: Math.round(text.length / 1024),
+      indexInlineImages: readFileSync(join(dir, 'guides_index.json'), 'utf8').includes('data:image/'),
+    };
+    // Markup that sneaks into the page can't run script.
+    sec.inlineScriptBlocked = await js(`new Promise((r) => {
+      window.__flowdocInjected = 0;
+      const d = document.createElement('div');
+      d.innerHTML = '<img src="data:," onerror="window.__flowdocInjected = 1">';
+      document.body.append(d);
+      setTimeout(() => { d.remove(); r(window.__flowdocInjected === 0); }, 600);
+    })`);
+    // An imported file can't put markup or scripts into the page.
+    sec.import = await js(`import('/app/exporters/index.js').then((m) => {
+      const g = m.parseImport(JSON.stringify({ steps: [{ id: 'x"><img src=x onerror=alert(1)>', kind: '"><b>', text: 'hi', href: 'javascript:alert(1)', screenshot: 'https://example.invalid/x.png' }] }));
+      const s = g.steps[0];
+      return { id: s.id ?? null, kind: s.kind, href: s.href ?? null, screenshot: s.screenshot ?? null };
+    })`);
+    // The workspace window can't be navigated away from FlowDoc.
+    const home = mainWin.webContents.getURL();
+    await js(`location.href = 'file:///'; true`).catch(() => {});
+    await sleep(700);
+    sec.navigationBlocked = mainWin.webContents.getURL() === home;
+    // Permissions FlowDoc doesn't use are refused.
+    sec.geolocation = await js(`navigator.permissions.query({ name: 'geolocation' }).then((p) => p.state)`).catch((err) => String(err));
+    sec.notifications = await js(`Notification.permission`).catch((err) => String(err));
+    // The editor shows screenshots from the stored files.
+    await js(`location.hash = '#/guide/${guideId}'; window.flowdocApp.route()`);
+    await waitFor(() => js(`document.querySelector('.block .shot img')?.complete && document.querySelector('.block .shot img').naturalWidth > 0 || null`));
+    sec.editorImage = await js(`(() => { const i = document.querySelector('.block .shot img'); return { blob: i.src.startsWith('blob:'), width: i.naturalWidth }; })()`);
+    results.security = sec;
   }
 
   progress('exports');

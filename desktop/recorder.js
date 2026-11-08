@@ -113,6 +113,15 @@ export const NEAR_POINTER = [
 // text cursor reaches above the point.
 export const NEAR_POINTER_LINE = { x: -90, y: -18, w: 180, h: 34 };
 
+// ---------- password fields ----------
+
+// Field names that mean "password", in the languages FlowDoc is used in. A
+// field is a password field if the system says so, was one earlier in this
+// capture ("Show password" makes it an ordinary text field), or is named so.
+export const SECRET_NAME =
+  /pass(?:word|wd|code|phrase)|\bpwd\b|\bpin\b|kennwort|passwort|mot de passe|contrase(?:ñ|n)a|senha|wachtwoord|пароль|密码|密碼|パスワード|비밀번호|पासवर्ड|கடவுச்சொல்|పాస్‌?వర్డ్|ಪಾಸ್‌?ವರ್ಡ್|പാസ്‌?വേഡ്|পাসওয়ার্ড|પાસવર્ડ|ਪਾਸਵਰਡ|كلمة (?:السر|المرور)|סיסמה|şifre|hasło|heslo|jelszó|parola|lösenord|adgangskode|passord|salasana/i;
+const TEXT_FIELD = /edit|text|entry/i;
+
 // ---------- text helpers ----------
 
 const clean = (text, max = 60) => {
@@ -183,6 +192,9 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   let stray = null; // { key, name, step, at }
   const muted = new Set(); // apps the user said not to ask about again
   const appRects = new Map(); // app key -> its main window (DIP), to crop popups in context
+  // Password fields seen in this capture: kept out of every later screenshot
+  // of their window, even once "Show password" has made them plain text.
+  const secrets = new Map(); // app|window|name -> { app, window, rect, topRect } (physical px)
 
   const win = process.platform === 'win32';
   const toDip = (p) => (win ? screen.screenToDipPoint(p) : p);
@@ -256,6 +268,63 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   const overlaps = (a, d) => a.x < d.x + d.width && a.x + a.width > d.x && a.y < d.y + d.height && a.y + a.height > d.y;
   const fractionOf = (a, d) => ({ x: (a.x - d.x) / d.width, y: (a.y - d.y) / d.height, w: a.width / d.width, h: a.height / d.height });
 
+  // ---------- password fields ----------
+
+  const secretKey = (el) => `${appKey(el)}|${clean(el?.window, 120)}|${clean(el?.name)}`;
+  function isSecretField(el) {
+    if (!el) return false;
+    if (el.isPassword || secrets.has(secretKey(el))) return true;
+    return TEXT_FIELD.test(String(el.type || '')) && SECRET_NAME.test(String(el.name || ''));
+  }
+  function noteSecret(el) {
+    if (el?.rect?.w > 0 && isSecretField(el)) secrets.set(secretKey(el), { app: appKey(el), window: clean(el.window, 120), rect: el.rect, topRect: el.topRect || null });
+  }
+  // Where this capture's password fields are in a shot of `display` taken
+  // for `el`, as fractions of the display: those in el's window, moved along
+  // with the window if it moved since.
+  // When the element couldn't be identified (the accessibility helper didn't
+  // answer), every known field on the display is covered: better a covered
+  // spot too many than a password in the guide.
+  function secretBoxes(el, display) {
+    if (!secrets.size) return [];
+    const app = el ? appKey(el) : null;
+    const win = el ? clean(el.window, 120) : null;
+    const own = el ? secretKey(el) : null;
+    const db = display.bounds;
+    const boxes = [];
+    for (const [key, s] of secrets) {
+      if (el && (s.app !== app || s.window !== win)) continue;
+      let r = el && key === own && el.rect?.w > 0 ? el.rect : s.rect;
+      if (el && r === s.rect && s.topRect && el.topRect?.w > 0) r = { ...r, x: r.x + el.topRect.x - s.topRect.x, y: r.y + el.topRect.y - s.topRect.y };
+      const d = rectToDip(r);
+      const box = { x: d.x - 4, y: d.y - 4, width: d.width + 8, height: d.height + 8 };
+      if (!overlaps(box, db)) continue;
+      const x = Math.max(box.x, db.x);
+      const y = Math.max(box.y, db.y);
+      const w = Math.min(box.x + box.width, db.x + db.width) - x;
+      const h = Math.min(box.y + box.height, db.y + db.height) - y;
+      if (w > 0 && h > 0) boxes.push({ x: (x - db.x) / db.width, y: (y - db.y) / db.height, w: w / db.width, h: h / db.height });
+    }
+    return boxes;
+  }
+  // Covers the password fields in the step's screenshot itself (the capture
+  // window does it), so the stored image never holds them. If that can't be
+  // done, the step keeps no screenshot rather than one showing a password.
+  async function hideSecrets(step) {
+    const boxes = step.secretBoxes;
+    delete step.secretBoxes;
+    if (!boxes?.length || !step.screenshot) return;
+    const hidden = await capture.redact?.(step.screenshot, boxes).catch(() => null);
+    if (hidden) {
+      step.screenshot = hidden;
+      step.secretsHidden = boxes.length; // how many password fields were in the shot
+    } else {
+      log('could not hide a password field; the step is kept without its screenshot');
+      step.screenshot = null;
+      step.shot = null;
+    }
+  }
+
   // When other apps may see the recorder bar, it is kept out of our own shot
   // by hiding it from captures for a moment (capture.grab's `cover`). Where
   // that isn't possible (Linux), buildStep blurs it instead.
@@ -294,11 +363,14 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     // A recorder bar that is still in the shot (Linux, or hiding it failed) is blurred.
     const wb = widgetBounds?.();
     if (wb && frame && !frame.barHidden && overlaps(wb, db)) step.redactions.push(fractionOf(wb, db));
+    noteSecret(el);
+    if (frame) step.secretBoxes = secretBoxes(el, display);
     return step;
   }
 
   async function appendSteps(steps, { replaceId } = {}) {
     lastClickStep = null; // any new step ends a run of repeated clicks
+    for (const step of steps) await hideSecrets(step);
     const guide = await getGuide(state.guideId);
     if (!guide) return;
     for (const step of steps) {
@@ -313,6 +385,7 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
 
   // A step that happened a moment ago, placed among this session's steps by time.
   async function insertStep(step) {
+    await hideSecrets(step);
     const guide = await getGuide(state.guideId);
     if (!guide) return;
     let at = guide.steps.length;
@@ -397,7 +470,9 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
   // Whether the screen looks the same in two shots of `rec`'s window, leaving
   // out the recorder bar and, at each of `points`, what comes and goes with
   // the mouse pointer rather than with a click (NEAR_POINTER).
-  function unchanged(a, b, rec, display, points) {
+  // The comparison runs in the capture window when it can (capture.diff), so
+  // the main process isn't held up decoding two full-screen images.
+  async function unchanged(a, b, rec, display, points) {
     if (!a?.dataUrl || !b?.dataUrl) return false;
     const db = display.bounds;
     const boxes = rec.kind === 'dblclick' ? [...NEAR_POINTER, NEAR_POINTER_LINE] : NEAR_POINTER;
@@ -405,7 +480,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     const wb = widgetBounds?.();
     if (wb && overlaps(wb, db)) masks.push(fractionOf(wb, db));
     try {
-      return !shotsDiffer(a.dataUrl, b.dataUrl, rec.region, masks);
+      const differ = (await capture.diff?.(a.dataUrl, b.dataUrl, rec.region, masks)) ?? shotsDiffer(a.dataUrl, b.dataUrl, rec.region, masks);
+      return !differ;
     } catch (err) {
       log(`repeat check failed: ${err.message}`);
       return false;
@@ -421,8 +497,8 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     clearTimeout(p.timer);
     const { record: cur, prev, display } = p;
     const sameKind = prev.kind === cur.kind;
-    const idleBefore = sameKind && unchanged(prev.frame, cur.frame, cur, display, [prev, cur]);
-    const idleAfter = sameKind && !idleBefore && after?.dataUrl && unchanged(cur.frame, after, cur, display, [cur, at]);
+    const idleBefore = sameKind && (await unchanged(prev.frame, cur.frame, cur, display, [prev, cur]));
+    const idleAfter = sameKind && !idleBefore && !!after?.dataUrl && (await unchanged(cur.frame, after, cur, display, [cur, at]));
     if (idleBefore || idleAfter) {
       log(`dropped a repeated ${cur.kind} (${idleBefore ? 'no change since the last one' : 'it changed nothing'})`);
       lastClickStep = cur; // still the click the next one is compared with
@@ -498,17 +574,18 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
       const field = (fresh ? d.snapshot : d.field) || d.snapshot || null;
       if (isOwnElement(field, d.point)) return; // typing in FlowDoc's own UI
       if (!inScope(field)) return;
+      const secret = isSecretField(field) || isSecretField(d.field) || isSecretField(d.snapshot);
       const known = !!field && ['edit', 'document', 'combobox'].includes(String(field.type).toLowerCase());
       let value = null;
-      if (!field?.isPassword && captureSettings.typedText !== false) {
+      if (!secret && captureSettings.typedText !== false) {
         if (fresh && field?.value) value = field.value;
         else if (known || captureSettings.unknownFieldText) value = d.chars;
       }
-      const text = describeTyping(field, value);
+      const text = describeTyping(field && { ...field, isPassword: secret }, value);
       const frame = await framePromise;
       const display =
         scope.mode === 'area' ? areaDisplay() : field?.rect ? displayAt(toDip({ x: field.rect.x + field.rect.w / 2, y: field.rect.y + field.rect.h / 2 })) : displayAt(cursor);
-      const step = buildStep({ frame, display, el: field, action: 'type', text, extra: { value: field?.isPassword ? '' : value || '', secret: !!field?.isPassword } });
+      const step = buildStep({ frame, display, el: field && { ...field, isPassword: secret }, action: 'type', text, extra: { value: secret ? '' : value || '', secret } });
 
       // Continuing to type in the same field refines the previous step.
       const guide = await getGuide(state.guideId);
@@ -681,11 +758,13 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     }
     guide.captureScope = cleanScope(scope);
     await saveGuide(guide);
-    await Promise.all([capture.start(), inspector.warmUp()]);
+    // An area capture streams only the area's display.
+    await Promise.all([capture.start(scope.mode === 'area' ? [areaDisplay().id] : null), inspector.warmUp()]);
     const stepCount = guide.steps.filter((s) => s.kind === 'action').length;
     stray = null;
     muted.clear();
     appRects.clear();
+    secrets.clear();
     lastInArea = false;
     state = { active: true, paused: false, guideId: guide.id, stepCount, startedAt: Date.now(), continuing: !!keepIds, scope: cleanScope(scope) };
     if (!hookRunning && !process.env.FLOWDOC_NO_HOOK) {
@@ -798,8 +877,10 @@ export function createRecorder({ capture, inspector, settings, isOwnWindow, isOw
     const next = cleanScope({ mode: 'area', area }).area;
     if (!(next?.width > 0)) return { ...state };
     if (draft) flushDraft();
+    const before = areaDisplay().id;
     scope.area = next;
     lastInArea = false;
+    if (areaDisplay().id !== before) await capture.setDisplays?.([areaDisplay().id]);
     await saveScope();
     return { ...state };
   }
