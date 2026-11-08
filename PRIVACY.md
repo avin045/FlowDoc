@@ -2,7 +2,7 @@
 
 Last updated: November 8, 2026
 
-This policy covers both FlowDoc apps: the **desktop app** for Windows and Linux, and the **FlowDoc — Step Recorder browser extension** for Chrome and Edge. FlowDoc is free, open-source software. You can read every line of its code in this repository. Where the two apps differ, this policy says which one it means.
+This policy covers both FlowDoc apps: the **desktop app** for Windows and Linux, and the **FlowDoc - Step Recorder browser extension** for Chrome and Edge. FlowDoc is free, open-source software. You can read every line of its code in this repository. Where the two apps differ, this policy says which one it means.
 
 ## Summary
 

@@ -104,7 +104,7 @@ You don't need any developer tools for this.
    - **Edge:** type `edge://extensions` in the address bar and press Enter.
 4. Turn on **Developer mode**: a switch at the top-right in Chrome, or in the left sidebar in Edge.
 5. Click **Load unpacked** and select the `extension` folder inside the folder you unzipped (the folder that contains `manifest.json`).
-6. **FlowDoc — Step Recorder** now appears in the list. Click the puzzle-piece icon in the toolbar, then the pin icon next to FlowDoc, so its icon is always visible.
+6. **FlowDoc - Step Recorder** now appears in the list. Click the puzzle-piece icon in the toolbar, then the pin icon next to FlowDoc, so its icon is always visible.
 
 > Pages that were already open before you installed the extension can't be recorded until you reload them (F5). FlowDoc reloads its recorder into the current tab automatically when you start a capture, so this mostly matters for other tabs.
 

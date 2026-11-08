@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "FlowDoc — Step Recorder",
+  "name": "FlowDoc - Step Recorder",
   "short_name": "FlowDoc",
   "version": "1.1.2",
   "description": "Record any browser workflow and turn it into a step-by-step guide with screenshots. Export to HTML, PDF, Word or Markdown.",
