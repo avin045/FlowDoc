@@ -1,6 +1,6 @@
 {
   "name": "flowdoc",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "FlowDoc - record workflows (browser extension or Windows/Linux desktop app) into step-by-step guides; export to HTML, PDF, Word or Markdown",
   "desktopName": "flowdoc.desktop",
   "license": "Apache-2.0",
