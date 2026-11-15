@@ -16,13 +16,13 @@
 [![Chrome Web Store version](https://img.shields.io/chrome-web-store/v/gfpdkldffmgjljmmfhcdaladmoeomffl?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/gfpdkldffmgjljmmfhcdaladmoeomffl)
 [![Linux: build from source](https://img.shields.io/badge/Linux-build%20from%20source-FCC624?logo=linux&logoColor=black)](docs/installation.md#linux)
 
-[Install](#install) · [Watch the demo](#see-it-in-action) · [User guide](docs/user-guide.md) · [Privacy](PRIVACY.md) · [Developers](docs/developers.md)
+[Install](#install) · [Watch the intro](#flowdoc-intro) · [User guide](docs/user-guide.md) · [Privacy](PRIVACY.md) · [Developers](docs/developers.md)
 
 </div>
 
-## See it in action
+## FlowDoc intro
 
-https://github.com/user-attachments/assets/02d26305-98c9-4200-8325-d310765a0757
+https://github.com/user-attachments/assets/fe79f878-f71d-47a6-842e-e1a22e1a8239
 
 ## Install
 
