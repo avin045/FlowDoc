@@ -22,13 +22,7 @@
 
 ## See it in action
 
-<div align="center">
-
-<a href="docs/media/flowdoc-demo.mp4"><img src="docs/media/flowdoc-demo-poster.jpg" alt="FlowDoc demo video: do the task once, it writes the guide. Click to play." width="640"></a>
-
-**[▶ Watch the demo video](docs/media/flowdoc-demo.mp4)** (MP4, 17 MB)
-
-</div>
+https://github.com/user-attachments/assets/02d26305-98c9-4200-8325-d310765a0757
 
 ## Install
 
