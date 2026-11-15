@@ -11,11 +11,22 @@
 [![Platforms: Windows, Linux, Chrome and Edge](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20Chrome%20%7C%20Edge-0078D6)](#install)
 
 [![Download for Windows](https://img.shields.io/badge/Download%20for%20Windows-4F46E5?style=for-the-badge)](https://github.com/avin045/FlowDoc/releases/latest)
+[![Add to Chrome: free in the Chrome Web Store](https://img.shields.io/badge/Add%20to%20Chrome-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/gfpdkldffmgjljmmfhcdaladmoeomffl)
 
-[![Chrome / Edge extension: any computer](https://img.shields.io/badge/Chrome%20%2F%20Edge%20extension-any%20computer-4285F4?logo=googlechrome&logoColor=white)](docs/installation.md#chrome-and-edge-extension)
+[![Chrome Web Store version](https://img.shields.io/chrome-web-store/v/gfpdkldffmgjljmmfhcdaladmoeomffl?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/gfpdkldffmgjljmmfhcdaladmoeomffl)
 [![Linux: build from source](https://img.shields.io/badge/Linux-build%20from%20source-FCC624?logo=linux&logoColor=black)](docs/installation.md#linux)
 
-[Install](#install) · [User guide](docs/user-guide.md) · [Privacy](PRIVACY.md) · [Developers](docs/developers.md)
+[Install](#install) · [Watch the demo](#see-it-in-action) · [User guide](docs/user-guide.md) · [Privacy](PRIVACY.md) · [Developers](docs/developers.md)
+
+</div>
+
+## See it in action
+
+<div align="center">
+
+<a href="docs/media/flowdoc-demo.mp4"><img src="docs/media/flowdoc-demo-poster.jpg" alt="FlowDoc demo video: do the task once, it writes the guide. Click to play." width="640"></a>
+
+**[▶ Watch the demo video](docs/media/flowdoc-demo.mp4)** (MP4, 17 MB)
 
 </div>
 
@@ -48,15 +59,17 @@ Rather not build anything? The Chrome / Edge extension below works on Linux too.
 </details>
 
 <details>
-<summary><b>Chrome or Edge extension</b>: any computer (Windows, Mac, Linux)</summary>
+<summary><b>Chrome or Edge extension</b>: install from the Chrome Web Store, on any computer (Windows, Mac, Linux)</summary>
 
 <br>
 
-1. At the top of this page, click **Code** → **Download ZIP**, and unzip it to a folder you'll keep (not Downloads).
-2. Open `chrome://extensions` (or `edge://extensions`) and turn on **Developer mode**.
-3. Click **Load unpacked** and select the `extension` folder inside it.
+1. Click **Add to Chrome** above, or open [FlowDoc - Step Recorder in the Chrome Web Store](https://chromewebstore.google.com/detail/gfpdkldffmgjljmmfhcdaladmoeomffl).
+2. Click **Add to Chrome**, then **Add extension**.
+3. Pin it: click the puzzle-piece icon in the toolbar, then the pin next to FlowDoc.
 
-The extension records what you do inside the browser only. [Full extension steps](docs/installation.md#chrome-and-edge-extension), including how to update without losing your guides.
+**Edge:** open the same Web Store page, click **Allow extensions from other stores** when Edge asks, then add it the same way.
+
+The extension records what you do inside the browser only, and updates itself automatically. [Full extension steps](docs/installation.md#chrome-and-edge-extension), including a manual install from the source code.
 
 </details>
 

@@ -4,7 +4,7 @@ FlowDoc comes as a desktop app and as a browser extension. Pick the one for your
 
 - **[Windows](#windows)**: download the installer. Recommended: it records any app on your PC.
 - **[Linux](#linux)**: build the desktop app from source.
-- **[Chrome and Edge extension](#chrome-and-edge-extension)**: works on any computer, and records what you do inside the browser.
+- **[Chrome and Edge extension](#chrome-and-edge-extension)**: install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/gfpdkldffmgjljmmfhcdaladmoeomffl). Works on any computer, and records what you do inside the browser.
 
 Not sure which one? See [Which version should I use?](#which-version-should-i-use) below. Once FlowDoc is installed, the [user guide](user-guide.md) explains how to record, edit and export guides.
 
@@ -14,7 +14,7 @@ Not sure which one? See [Which version should I use?](#which-version-should-i-us
 | --- | --- | --- |
 | Records | Clicks and typing in **any app**: File Explorer / Files, browsers, Office, Settings, terminals… | Clicks and typing inside **browser tabs** |
 | Platforms | Windows 10/11, Linux (X11 session) | Chrome, Edge (Windows, Linux, macOS) |
-| Install | Download the installer from the Releases page (Windows); build from source (Linux) | Download the code as a ZIP and load the `extension` folder into the browser |
+| Install | Download the installer from the Releases page (Windows); build from source (Linux) | Add it from the Chrome Web Store (Chrome and Edge), or load the `extension` folder from the source ZIP |
 | Tested | Yes, on Windows (Linux not yet on real hardware) | Yes, by hand in Google Chrome; automated test in Microsoft Edge |
 | What to record | Whole screen, an area, or only the apps you choose | The browser tab you pick |
 | Improve with AI (Gemini / Groq) | Optional: Crisp, Elaborate or Conceptual. Key encrypted by your operating system (DPAPI on Windows, GNOME Keyring or KWallet on Linux). | Optional: same styles. Key kept in browser storage, encrypted (AES-GCM). |
@@ -95,7 +95,18 @@ The extension works in Chrome and Edge on Windows, Mac and Linux, and records wh
 
 ### Install the extension
 
-You don't need any developer tools for this.
+#### From the Chrome Web Store (recommended)
+
+1. Open [FlowDoc - Step Recorder in the Chrome Web Store](https://chromewebstore.google.com/detail/gfpdkldffmgjljmmfhcdaladmoeomffl).
+2. **Chrome:** click **Add to Chrome**, then **Add extension**.
+   **Edge:** click **Allow extensions from other stores** in the banner at the top and confirm with **Allow**. Then click **Add to Chrome** (or **Get**) and **Add extension**.
+3. Click the puzzle-piece icon in the toolbar, then the pin icon next to FlowDoc, so its icon is always visible.
+
+The browser keeps a Web Store install up to date by itself.
+
+#### Manual install from the source code
+
+Use this to run the latest code from the repository, or if you can't use the Web Store. You don't need any developer tools for this.
 
 1. On the [repository page](https://github.com/avin045/FlowDoc), click **Code** → **Download ZIP**.
 2. Unzip it to a folder you will keep, for example `Documents\FlowDoc`, not your Downloads folder. The browser loads the extension from this folder every time it starts.
@@ -111,6 +122,12 @@ You don't need any developer tools for this.
 The extension records only inside the browser. For work in other programs (File Explorer, Office, Settings…), use the [desktop app](#windows).
 
 ### Update the extension
+
+**Installed from the Chrome Web Store:** nothing to do. The browser updates FlowDoc automatically and keeps your guides.
+
+**Switching from a manual install to the Web Store:** the browser treats the two as separate extensions, so your guides don't move over by themselves. Export a **Backup (.json)** of each guide from the old copy, add FlowDoc from the Web Store, then use **Import** in the new copy. Remove the old card only after your guides are imported.
+
+**Installed manually from the source code:**
 
 1. Export a backup of your guides first: open each guide you want to keep and use **Export → Backup (.json)**.
 2. Download the new ZIP and unzip it **over the same folder** you loaded before, replacing the old files.
